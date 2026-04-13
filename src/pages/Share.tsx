@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Download, Share2, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
+import { captureEvent } from '@/lib/analytics';
 
 type CardState =
   | { phase: 'loading' }
@@ -107,6 +108,7 @@ export default function SharePage() {
 
   const handleDownload = async () => {
     if (state.phase !== 'ready') return;
+    captureEvent('share_clicked', { method: 'download', analysis_id: id });
     setIsDownloading(true);
     try {
       const res = await fetch(state.signedUrl);
@@ -131,6 +133,7 @@ export default function SharePage() {
 
   const handleShare = async () => {
     if (state.phase !== 'ready') return;
+    captureEvent('share_clicked', { method: 'native_share', analysis_id: id });
     setIsSharing(true);
     try {
       if (navigator.share) {

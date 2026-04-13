@@ -1,0 +1,90 @@
+{
+  "common": {
+    "disclaimer": "Fun resemblance analysis \u2014 not a genetic or paternity test.",
+    "backToHome": "Back to home",
+    "tryAgain": "Try again",
+    "loading": "Loading\u2026",
+    "error": "Something went wrong.",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "splash": {
+    "tagline": "Discover where your face comes from.",
+    "cta": "Get started"
+  },
+  "auth": {
+    "title": "Sign in",
+    "emailLabel": "Email",
+    "emailPlaceholder": "you@example.com",
+    "magicLinkCta": "Continue with email",
+    "googleCta": "Continue with Google",
+    "ageAttestation": "By continuing you confirm you are 18 or older.",
+    "checkInbox": "Check your inbox",
+    "checkInboxBody": "We sent a sign-in link to {{email}}. Click it to continue.",
+    "differentEmail": "Use a different email"
+  },
+  "home": {
+    "title": "Your family",
+    "addYourself": "Add yourself",
+    "addMom": "Add Mom",
+    "addDad": "Add Dad",
+    "addGrandparent": "Add Grandparent",
+    "addSibling": "Add Sibling",
+    "discoverCta": "Discover your Family DNA",
+    "addMoreCta": "Add yourself + 1 family member to start"
+  },
+  "capture": {
+    "title": "Guided capture",
+    "instructionFront": "Look straight at the camera",
+    "instructionLeft": "Turn your head slightly left",
+    "instructionRight": "Turn your head slightly right",
+    "holdStill": "Hold still\u2026",
+    "uploading": "Uploading\u2026",
+    "done": "All captured!",
+    "retryCamera": "Retry camera",
+    "fallback": "Upload photos instead"
+  },
+  "analysis": {
+    "pending": "Getting ready\u2026",
+    "embedding": "Reading your features\u2026",
+    "matching": "Comparing with your family\u2026",
+    "narrating": "Asking the ancestors\u2026",
+    "rendering": "Painting your DNA map\u2026",
+    "done": "All done!",
+    "failed": "Something went wrong.",
+    "retryFromHome": "Try again from Home"
+  },
+  "results": {
+    "title": "Your Family DNA Map",
+    "tapHint": "Tap a pin to explore",
+    "featuresMatched": "{{name}} \u00b7 {{count}} features matched",
+    "shareCta": "Share your DNA map",
+    "noMatches": "No matches found",
+    "noMatchesBody": "Make sure you and at least one family member have completed feature capture."
+  },
+  "share": {
+    "title": "Your Legacy Card",
+    "rendering": "Rendering your share card\u2026",
+    "renderingHint": "This may take up to 15 seconds",
+    "download": "Download",
+    "share": "Share",
+    "copied": "Copied!",
+    "shareHintNative": "Tap Share to send your card via any app.",
+    "shareHintFallback": "Download the card and share it anywhere you like.",
+    "backToResults": "Back to results"
+  },
+  "settings": {
+    "title": "Settings",
+    "signedIn": "Signed in",
+    "privacy": "Privacy controls",
+    "privacySub": "Manage data & retention",
+    "signOut": "Sign out",
+    "deleteAccount": "Delete my account",
+    "deleteAccountSub": "Permanently erase all data",
+    "deleteDialog": {
+      "title": "Delete your account?",
+      "body": "This will permanently erase all your photos, embeddings, analyses, and results. This action cannot be undone.",
+      "confirm": "Yes, delete everything"
+    }
+  }
+}

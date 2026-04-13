@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { identifyUser, resetAnalytics } from '@/lib/analytics';
+import { setSentryUser, clearSentryUser } from '@/lib/sentry';
 
 type AuthContextValue = {
   session: Session | null;
@@ -24,12 +26,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Hydrate from persisted session
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      if (data.session?.user) {
+        identifyUser(data.session.user.id);
+        setSentryUser(data.session.user.id);
+      }
       setLoading(false);
     });
 
     // Listen for auth state changes (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
+      if (newSession?.user) {
+        identifyUser(newSession.user.id);
+        setSentryUser(newSession.user.id);
+      } else {
+        resetAnalytics();
+        clearSentryUser();
+      }
     });
 
     return () => subscription.unsubscribe();

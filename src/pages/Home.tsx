@@ -1,27 +1,58 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, User, Loader2 } from 'lucide-react';
+import { Plus, User, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { captureEvent } from '@/lib/analytics';
 import type { Person } from '@/lib/supabase';
 
-const spring = { type: 'spring' as const, stiffness: 260, damping: 20 };
+const spring = { type: 'spring' as const, stiffness: 300, damping: 26 };
 
 // Relationship slots shown on the home screen
 const EMPTY_SLOTS = [
-  { label: 'Add Mom', tag: 'mother' },
-  { label: 'Add Dad', tag: 'father' },
-  { label: 'Add Grandparent', tag: 'maternal_grandma' },
-  { label: 'Add Sibling', tag: 'sibling' },
+  { label: 'Add Mom',         tag: 'mother'          },
+  { label: 'Add Dad',         tag: 'father'          },
+  { label: 'Add Grandparent', tag: 'maternal_grandma'},
+  { label: 'Add Sibling',     tag: 'sibling'         },
 ];
+
+// ── Loading skeleton ───────────────────────────────────────────────────────────
+
+function HomeSkeleton() {
+  return (
+    <div className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24" aria-busy="true" aria-label="Loading family tree">
+      <Skeleton className="h-7 w-36 rounded-lg" />
+      {/* Self avatar skeleton */}
+      <div className="flex flex-col items-center gap-2">
+        <Skeleton className="w-24 h-24 rounded-full" />
+        <Skeleton className="h-4 w-20 rounded" />
+      </div>
+      {/* Card skeletons */}
+      <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
+        {[0, 1, 2, 3].map(i => (
+          <Skeleton key={i} className="h-28 rounded-2xl" />
+        ))}
+      </div>
+      <Skeleton className="h-12 w-52 rounded-full mt-4" />
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
 
 const Home = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const { data: persons = [] } = useQuery<Person[]>({
+  const {
+    data: persons = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery<Person[]>({
     queryKey: ['persons', user?.id],
     enabled: !!user,
     queryFn: async () => {
@@ -35,16 +66,23 @@ const Home = () => {
     },
   });
 
-  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzing, setAnalyzing]   = useState(false);
   const [analyzeError, setAnalyzeError] = useState('');
 
-  const self = persons.find(p => p.is_self);
+  const self   = persons.find(p => p.is_self);
   const family = persons.filter(p => !p.is_self);
+
+  const canAnalyze = !!self && family.length >= 1;
+
+  // Determine which empty slots still need to be filled
+  const filledTags  = new Set(family.map(p => p.relationship_tag));
+  const emptySlots  = EMPTY_SLOTS.filter(s => !filledTags.has(s.tag));
 
   const startAnalysis = async () => {
     if (!self || !user) return;
     setAnalyzing(true);
     setAnalyzeError('');
+    captureEvent('analysis_started', { self_person_id: self.id });
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(
@@ -67,14 +105,32 @@ const Home = () => {
     }
   };
 
-  // Determine which empty slots still need to be filled
-  const filledTags = new Set(family.map(p => p.relationship_tag));
-  const emptySlots = EMPTY_SLOTS.filter(s => !filledTags.has(s.tag));
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (isLoading) return <HomeSkeleton />;
 
-  const canAnalyze = !!self && family.length >= 1;
+  // ── Error ──────────────────────────────────────────────────────────────────
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-6" role="alert">
+        <AlertCircle size={36} className="text-destructive" aria-hidden="true" />
+        <p className="text-sm text-muted-foreground text-center">
+          Could not load your family tree. Please try again.
+        </p>
+        <button
+          className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 transition-colors text-sm font-medium"
+          onClick={() => refetch()}
+          aria-label="Retry loading family tree"
+        >
+          <RefreshCw size={14} aria-hidden="true" />
+          Retry
+        </button>
+      </div>
+    );
+  }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24">
+    <main className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24">
       <motion.h1
         className="text-2xl font-bold"
         initial={{ opacity: 0 }}
@@ -87,14 +143,18 @@ const Home = () => {
       {/* Self avatar */}
       <div className="flex flex-col items-center gap-2">
         <motion.div
-          className="w-24 h-24 rounded-full bg-white/5 border-2 border-dashed border-white/20 flex items-center justify-center overflow-hidden"
+          className="w-24 h-24 rounded-full bg-white/5 border-2 border-dashed border-white/20 flex items-center justify-center overflow-hidden focus-visible:ring-2 focus-visible:ring-cyan focus-visible:outline-none"
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ ...spring, delay: 0.1 }}
           onClick={() => !self && navigate('/capture')}
+          role={self ? undefined : 'button'}
+          tabIndex={self ? undefined : 0}
+          aria-label={self ? `${self.display_name} — your photo` : 'Add your photo'}
+          onKeyDown={e => { if (!self && e.key === 'Enter') navigate('/capture'); }}
           style={{ cursor: self ? 'default' : 'pointer' }}
         >
-          <User size={36} className="text-muted-foreground" />
+          <User size={36} className="text-muted-foreground" aria-hidden="true" />
         </motion.div>
         <span className="text-sm text-muted-foreground">
           {self ? self.display_name : 'Add yourself'}
@@ -103,20 +163,23 @@ const Home = () => {
 
       {/* Family members already added */}
       {family.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
+        <div className="grid grid-cols-2 gap-3 w-full max-w-sm" role="list" aria-label="Family members">
           {family.map((person, i) => (
             <motion.div
               key={person.id}
               className="glass-card p-5 flex flex-col items-center gap-2"
+              role="listitem"
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring, delay: 0.15 + i * 0.05 }}
             >
-              <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center" aria-hidden="true">
                 <User size={20} className="text-muted-foreground" />
               </div>
               <span className="text-xs font-medium text-center leading-tight">{person.display_name}</span>
-              <span className="text-xs text-muted-foreground capitalize">{person.relationship_tag.replace(/_/g, ' ')}</span>
+              <span className="text-xs text-muted-foreground capitalize">
+                {person.relationship_tag.replace(/_/g, ' ')}
+              </span>
             </motion.div>
           ))}
         </div>
@@ -128,13 +191,14 @@ const Home = () => {
           {emptySlots.map((slot, i) => (
             <motion.button
               key={slot.tag}
-              className="glass-card p-6 flex flex-col items-center gap-2 hover:bg-white/10 transition-colors"
+              className="glass-card p-6 flex flex-col items-center gap-2 hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-cyan focus-visible:outline-none"
               onClick={() => navigate(`/family/add?tag=${slot.tag}`)}
+              aria-label={slot.label}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring, delay: 0.2 + i * 0.05 }}
             >
-              <Plus size={24} className="text-cyan" />
+              <Plus size={24} className="text-cyan" aria-hidden="true" />
               <span className="text-sm text-muted-foreground">{slot.label}</span>
             </motion.button>
           ))}
@@ -147,20 +211,25 @@ const Home = () => {
           className="btn-gradient px-8 py-3 text-base mt-4 disabled:opacity-40 flex items-center gap-2"
           onClick={canAnalyze ? startAnalysis : () => navigate('/capture')}
           disabled={analyzing}
+          aria-busy={analyzing}
+          aria-label={canAnalyze ? 'Start Family DNA analysis' : 'Add yourself and a family member to start'}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ ...spring, delay: 0.4 }}
           whileHover={!analyzing ? { scale: 1.04 } : {}}
           whileTap={!analyzing ? { scale: 0.97 } : {}}
         >
-          {analyzing && <Loader2 size={16} className="animate-spin" />}
+          {analyzing && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
           {canAnalyze ? 'Discover your Family DNA' : 'Add yourself + 1 family member to start'}
         </motion.button>
+
         {analyzeError && (
-          <p className="text-xs text-destructive text-center max-w-xs">{analyzeError}</p>
+          <p className="text-xs text-destructive text-center max-w-xs" role="alert">
+            {analyzeError}
+          </p>
         )}
       </div>
-    </div>
+    </main>
   );
 };
 

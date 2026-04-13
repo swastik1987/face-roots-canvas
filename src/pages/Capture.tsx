@@ -23,6 +23,7 @@ import { extractPose } from '@/lib/face/pose';
 import { useFaceStore } from '@/stores/faceStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { captureEvent } from '@/lib/analytics';
 import type { CaptureAngle } from '@/stores/faceStore';
 import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 
@@ -105,7 +106,7 @@ const Capture = () => {
     let cancelled = false;
     initDetector()
       .then(() => setRunningMode('VIDEO'))
-      .then(() => { if (!cancelled) setStep('detecting_front'); })
+      .then(() => { if (!cancelled) { setStep('detecting_front'); captureEvent('capture_started'); } })
       .catch(err => console.error('FaceLandmarker init failed', err));
     return () => { cancelled = true; };
   }, []);
@@ -246,6 +247,7 @@ const Capture = () => {
       }
 
       clearFrames();
+      captureEvent('capture_done');
       setStep('done');
     } catch (err) {
       console.error('Upload failed', err);

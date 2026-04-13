@@ -9,6 +9,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { supabase, type Analysis } from '@/lib/supabase';
+import { captureEvent } from '@/lib/analytics';
 
 type Status = Analysis['status'];
 
@@ -79,10 +80,10 @@ const AnalysisProgress = () => {
     return () => { channel.unsubscribe(); };
   }, [id]);
 
-  // Navigate when done
+  // Fire analytics + navigate when done
   useEffect(() => {
     if (status === 'done' && id) {
-      // Short delay so the user sees "All done!" before redirecting
+      captureEvent('analysis_done', { analysis_id: id });
       const t = setTimeout(() => navigate(`/results/${id}`, { replace: true }), 1200);
       return () => clearTimeout(t);
     }
