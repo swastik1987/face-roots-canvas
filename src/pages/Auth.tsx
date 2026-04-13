@@ -1,14 +1,42 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Mail } from 'lucide-react';
+import { lovable } from '@/integrations/lovable/index';
+import { toast } from 'sonner';
 
 const spring = { type: 'spring' as const, stiffness: 260, damping: 20 };
 
 const Auth = () => {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin,
+      });
+
+      if (result.error) {
+        toast.error('Sign in failed. Please try again.');
+        return;
+      }
+
+      if (result.redirected) {
+        return;
+      }
+
+      navigate('/consent');
+    } catch {
+      toast.error('Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen px-6">
@@ -27,7 +55,7 @@ const Auth = () => {
 
         <button
           className="btn-gradient w-full py-3 flex items-center justify-center gap-2"
-          onClick={() => { console.log('TODO: auth'); navigate('/consent'); }}
+          onClick={() => { console.log('TODO: auth email'); navigate('/consent'); }}
         >
           <Mail size={18} /> Continue with email
         </button>
@@ -39,10 +67,11 @@ const Auth = () => {
         </div>
 
         <button
-          className="w-full py-3 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors font-medium"
-          onClick={() => { console.log('TODO: auth google'); navigate('/consent'); }}
+          className="w-full py-3 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors font-medium disabled:opacity-50"
+          onClick={handleGoogleSignIn}
+          disabled={loading}
         >
-          Continue with Google
+          {loading ? 'Signing in…' : 'Continue with Google'}
         </button>
       </motion.div>
     </div>
