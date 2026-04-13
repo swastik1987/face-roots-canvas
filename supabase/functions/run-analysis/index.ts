@@ -144,13 +144,7 @@ async function runPipeline(
     // ── Stage: narrating ─────────────────────────────────────────────────────
     await setStatus('narrating');
 
-    // Check if narrate-matches function exists (Phase 4), call if available
-    try {
-      await callFunction('narrate-matches', { analysis_id: analysisId }, userId);
-    } catch {
-      // narrate-matches ships in Phase 4 — skip gracefully
-      console.warn('[run-analysis] narrate-matches not available yet, skipping');
-    }
+    await callFunction('narrate-matches', { analysis_id: analysisId }, userId);
 
     // ── Stage: done ───────────────────────────────────────────────────────────
     await setStatus('done');
