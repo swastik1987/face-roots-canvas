@@ -7,7 +7,7 @@ const Wordmark = ({ className = '' }: { className?: string }) => (
     animate={{ opacity: 1, scale: 1 }}
     transition={{ type: 'spring', stiffness: 260, damping: 20 }}
   >
-    FaceRoots
+    FaceBlame
   </motion.h1>
 );
 

@@ -35,19 +35,30 @@ export async function initDetector(): Promise<void> {
 
   initPromise = (async () => {
     const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-    landmarker = await FaceLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: MODEL_URL,
-        delegate: 'GPU',
-      },
-      runningMode: 'IMAGE',
+
+    const options = {
+      runningMode: 'IMAGE' as const,
       numFaces: 1,
       minFaceDetectionConfidence: 0.5,
       minFacePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,
       outputFaceBlendshapes: false,
       outputFacialTransformationMatrixes: true,
-    });
+    };
+
+    // Try GPU first; fall back to CPU if the driver/browser rejects it.
+    try {
+      landmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
+        ...options,
+      });
+    } catch {
+      console.warn('[FaceBlame] GPU delegate failed, falling back to CPU');
+      landmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
+        ...options,
+      });
+    }
   })();
 
   return initPromise;

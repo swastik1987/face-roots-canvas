@@ -21,7 +21,7 @@ const TEASER_STEPS = [
   {
     step: '02',
     label: 'Cross-generation matching',
-    desc: 'FaceRoots maps features across decades to find inherited traits.',
+    desc: 'FaceBlame maps features across decades to find inherited traits.',
   },
   {
     step: '03',

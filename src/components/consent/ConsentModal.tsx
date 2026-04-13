@@ -108,7 +108,7 @@ export function ConsentModal({ onGranted }: Props) {
         </div>
 
         <p className="text-xs text-muted-foreground leading-relaxed">
-          FaceRoots is a fun visual resemblance tool — not a genetic, paternity, or ancestry test.
+          FaceBlame is a fun visual resemblance tool — not a genetic, paternity, or ancestry test.
           It must not be used for any legal, medical, or identity purpose. You must be 18 or older.
           You can revoke consent and delete your data at any time in Settings.
         </p>

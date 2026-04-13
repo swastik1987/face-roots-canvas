@@ -8,7 +8,7 @@ const supabaseAnonKey = (
 ) as string;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('[FaceRoots] Supabase env vars missing. Auth and DB calls will fail.');
+  console.warn('[FaceBlame] Supabase env vars missing. Auth and DB calls will fail.');
 }
 
 export const supabase = createClient(

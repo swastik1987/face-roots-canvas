@@ -160,7 +160,7 @@ export default function SharePage() {
         // URL-only share (fallback)
         await navigator.share({
           title: 'My Family DNA Map',
-          text: 'Check out my Family DNA Map from FaceRoots!',
+          text: 'Check out my Family DNA Map from FaceBlame!',
           url: window.location.href,
         });
       } else {
