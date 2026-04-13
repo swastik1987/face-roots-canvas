@@ -35,8 +35,8 @@ export async function cropFeatures(
   if (!result.faceLandmarks || result.faceLandmarks.length === 0) return [];
 
   const landmarks = result.faceLandmarks[0];
-  const w = 'naturalWidth' in source ? source.naturalWidth : source.videoWidth || source.width;
-  const h = 'naturalHeight' in source ? source.naturalHeight : source.videoHeight || source.height;
+  const w = 'naturalWidth' in source ? source.naturalWidth : ('videoWidth' in source ? source.videoWidth : source.width);
+  const h = 'naturalHeight' in source ? source.naturalHeight : ('videoHeight' in source ? source.videoHeight : source.height);
 
   const results: CropResult[] = [];
 
