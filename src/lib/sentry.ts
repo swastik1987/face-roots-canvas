@@ -3,6 +3,9 @@
  *
  * Uses @sentry/react for automatic React error boundary + breadcrumb capture.
  * All calls are no-ops when VITE_SENTRY_DSN is absent.
+ *
+ * NOTE: This file is .ts (not .tsx) — no JSX here.
+ * The <Sentry.ErrorBoundary> component is used directly in App.tsx.
  */
 
 import * as Sentry from '@sentry/react';
@@ -15,13 +18,12 @@ export function initSentry(): void {
     dsn: DSN,
     environment: import.meta.env.MODE,
     release: import.meta.env.VITE_APP_VERSION,
-    tracesSampleRate: 0.2,           // 20% of transactions sampled
-    replaysOnErrorSampleRate: 0.5,   // record replay on errors
+    tracesSampleRate: 0.2,
     integrations: [
       Sentry.browserTracingIntegration(),
     ],
     beforeSend(event) {
-      // Strip PII: remove user email from breadcrumbs
+      // Strip PII: remove user email from events
       if (event.user) delete event.user.email;
       return event;
     },
@@ -38,9 +40,8 @@ export function clearSentryUser(): void {
   Sentry.setUser(null);
 }
 
-/** Wrap a component with Sentry's React ErrorBoundary. */
-export const SentryErrorBoundary = DSN ? Sentry.ErrorBoundary : FallbackBoundary;
+/** The Sentry ErrorBoundary component — use this in .tsx files only. */
+export const SentryErrorBoundary = Sentry.ErrorBoundary;
 
-function FallbackBoundary({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
-}
+/** Whether Sentry is configured (used to conditionally render the boundary). */
+export const isSentryEnabled = !!DSN;
