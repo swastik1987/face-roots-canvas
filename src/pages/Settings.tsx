@@ -30,23 +30,25 @@ const Settings = () => {
     setDeleteError('');
 
     try {
-      // Phase 3 will replace this with the delete-my-data Edge Function.
-      // For now: write revoke consent event then delete the profile row
-      // (cascade will remove all child rows via FK).
-      await supabase.from('consent_events').insert({
-        user_id: user.id,
-        event_type: 'revoked',
-        scopes: { embeddings: false, raw_images: false, sharing: false },
-        policy_version: 'v1.0.0',
-        user_agent: navigator.userAgent,
-      });
-
-      // Stub — full erasure edge function ships in Phase 3.
-      // For now sign the user out; server-side deletion requires service role.
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-my-data`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+        },
+      );
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? 'Deletion failed');
+      }
       await signOut();
       navigate('/', { replace: true });
     } catch (err) {
-      setDeleteError('Something went wrong. Please try again.');
+      setDeleteError((err as Error).message || 'Something went wrong. Please try again.');
       setDeleting(false);
     }
   };

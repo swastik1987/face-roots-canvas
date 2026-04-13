@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, User } from 'lucide-react';
+import { Plus, User, Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,8 +35,37 @@ const Home = () => {
     },
   });
 
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState('');
+
   const self = persons.find(p => p.is_self);
   const family = persons.filter(p => !p.is_self);
+
+  const startAnalysis = async () => {
+    if (!self || !user) return;
+    setAnalyzing(true);
+    setAnalyzeError('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/run-analysis`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({ self_person_id: self.id }),
+        },
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Analysis failed to start');
+      navigate(`/analysis/${json.analysis_id}`);
+    } catch (err) {
+      setAnalyzeError((err as Error).message);
+      setAnalyzing(false);
+    }
+  };
 
   // Determine which empty slots still need to be filled
   const filledTags = new Set(family.map(p => p.relationship_tag));
@@ -112,18 +142,24 @@ const Home = () => {
       )}
 
       {/* CTA */}
-      <motion.button
-        className="btn-gradient px-8 py-3 text-base mt-4 disabled:opacity-40"
-        onClick={() => navigate('/capture')}
-        disabled={!canAnalyze}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ ...spring, delay: 0.4 }}
-        whileHover={canAnalyze ? { scale: 1.04 } : {}}
-        whileTap={canAnalyze ? { scale: 0.97 } : {}}
-      >
-        {canAnalyze ? 'Discover your Family DNA' : 'Add yourself + 1 family member to start'}
-      </motion.button>
+      <div className="flex flex-col items-center gap-2">
+        <motion.button
+          className="btn-gradient px-8 py-3 text-base mt-4 disabled:opacity-40 flex items-center gap-2"
+          onClick={canAnalyze ? startAnalysis : () => navigate('/capture')}
+          disabled={analyzing}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ ...spring, delay: 0.4 }}
+          whileHover={!analyzing ? { scale: 1.04 } : {}}
+          whileTap={!analyzing ? { scale: 0.97 } : {}}
+        >
+          {analyzing && <Loader2 size={16} className="animate-spin" />}
+          {canAnalyze ? 'Discover your Family DNA' : 'Add yourself + 1 family member to start'}
+        </motion.button>
+        {analyzeError && (
+          <p className="text-xs text-destructive text-center max-w-xs">{analyzeError}</p>
+        )}
+      </div>
     </div>
   );
 };
