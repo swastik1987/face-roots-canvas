@@ -16,6 +16,9 @@ import FamilyAdd from "@/pages/FamilyAdd";
 import AnalysisProgress from "@/pages/AnalysisProgress";
 import Results from "@/pages/Results";
 import SharePage from "@/pages/Share";
+import MysteryMatch from "@/pages/MysteryMatch";
+import SiblingMode from "@/pages/SiblingMode";
+import TimeMachine from "@/pages/TimeMachine";
 import Settings from "@/pages/Settings";
 import SettingsPrivacy from "@/pages/SettingsPrivacy";
 import NotFound from "@/pages/NotFound";
@@ -70,6 +73,9 @@ const AppRoutes = () => (
                 <Route path="/analysis/:id" element={<AnalysisProgress />} />
                 <Route path="/results/:id" element={<Results />} />
                 <Route path="/results/:id/share" element={<SharePage />} />
+                <Route path="/mystery/:id" element={<MysteryMatch />} />
+                <Route path="/sibling" element={<SiblingMode />} />
+                <Route path="/time-machine" element={<TimeMachine />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/privacy" element={<SettingsPrivacy />} />
               </Route>

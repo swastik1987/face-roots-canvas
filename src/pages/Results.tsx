@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Share2, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
+import { Share2, RefreshCw, AlertCircle, Loader2, HelpCircle } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import FaceSilhouette, { type FeatureType } from '@/components/results/FaceSilhouette';
@@ -288,19 +288,26 @@ export default function Results() {
         ))}
       </div>
 
-      {/* ── Share CTA ───────────────────────────────────────────────────────── */}
+      {/* ── CTAs ────────────────────────────────────────────────────────────── */}
       <motion.div
-        className="mt-8 flex flex-col items-center gap-2 px-6"
+        className="mt-8 flex flex-col items-center gap-3 px-6 w-full max-w-sm"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.7 }}
       >
         <button
-          className="btn-gradient px-8 py-3 text-base flex items-center gap-2"
+          className="btn-gradient px-8 py-3 text-base flex items-center gap-2 w-full justify-center"
           onClick={() => navigate(`/results/${id}/share`)}
         >
           <Share2 size={18} />
           Share your DNA map
+        </button>
+        <button
+          className="flex items-center gap-2 px-8 py-3 text-sm font-medium rounded-xl bg-white/8 hover:bg-white/12 active:scale-[0.97] transition-all border border-white/10 w-full justify-center"
+          onClick={() => navigate(`/mystery/${id}`)}
+        >
+          <HelpCircle size={16} className="text-cyan" />
+          Try Mystery Match
         </button>
       </motion.div>
 
