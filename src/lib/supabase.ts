@@ -66,6 +66,7 @@ export type Analysis = {
   status: 'pending' | 'embedding' | 'matching' | 'narrating' | 'rendering' | 'done' | 'failed';
   error_message: string | null;
   model_versions: { face: string; features: string; llm: string } | null;
+  card_storage_path: string | null;
   started_at: string;
   completed_at: string | null;
 };

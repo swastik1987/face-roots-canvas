@@ -35,3 +35,7 @@ export const RunAnalysisInput = z.object({
 export const MatchFeaturesInput = z.object({
   analysis_id: z.string().uuid(),
 });
+
+export const RenderLegacyCardInput = z.object({
+  analysis_id: z.string().uuid(),
+});

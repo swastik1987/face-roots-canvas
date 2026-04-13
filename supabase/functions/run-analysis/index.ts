@@ -8,7 +8,7 @@
  * (filter: id=eq.<analysis_id>) to get live status updates.
  *
  * Pipeline stages (each updates analyses.status):
- *   pending → embedding → matching → narrating → rendering → done
+ *   pending → matching → narrating → rendering → done
  *   Any failure → failed (with error_message)
  *
  * Rate limit: 3 analyses/day for free plan, 30 for pro.
@@ -30,6 +30,9 @@ Deno.serve(async (req) => {
   try {
     const user = await requireAuth(req);
     userId = user.id;
+
+    // Capture the user's JWT so sibling functions can authenticate as this user
+    const userToken = req.headers.get('Authorization')!.replace('Bearer ', '');
 
     const body = await req.json();
     const { self_person_id } = RunAnalysisInput.parse(body);
@@ -110,7 +113,7 @@ Deno.serve(async (req) => {
 
     // Run pipeline in background (don't await — respond immediately)
     EdgeRuntime.waitUntil(
-      runPipeline(analysisId, userId, self_person_id, db),
+      runPipeline(analysisId, userId, userToken, db),
     );
 
     return jsonResponse({ analysis_id: analysisId });
@@ -124,7 +127,7 @@ Deno.serve(async (req) => {
 async function runPipeline(
   analysisId: string,
   userId: string,
-  selfPersonId: string,
+  userToken: string,
   db: ReturnType<typeof getAdminClient>,
 ) {
   const setStatus = (status: string, errorMessage?: string) =>
@@ -137,14 +140,21 @@ async function runPipeline(
   try {
     // ── Stage: matching ───────────────────────────────────────────────────────
     await setStatus('matching');
-
-    // Call match-features function internally via HTTP
-    await callFunction('match-features', { analysis_id: analysisId }, userId);
+    await callFunction('match-features', { analysis_id: analysisId }, userToken);
 
     // ── Stage: narrating ─────────────────────────────────────────────────────
     await setStatus('narrating');
+    await callFunction('narrate-matches', { analysis_id: analysisId }, userToken);
 
-    await callFunction('narrate-matches', { analysis_id: analysisId }, userId);
+    // ── Stage: rendering ─────────────────────────────────────────────────────
+    await setStatus('rendering');
+    try {
+      await callFunction('render-legacy-card', { analysis_id: analysisId }, userToken);
+    } catch (renderErr) {
+      // Rendering failure is non-fatal: the card can be re-rendered on demand
+      // from the Share page. Log and continue to mark the analysis as done.
+      console.warn('[run-analysis] render-legacy-card failed (non-fatal):', renderErr);
+    }
 
     // ── Stage: done ───────────────────────────────────────────────────────────
     await setStatus('done');
@@ -155,15 +165,17 @@ async function runPipeline(
   }
 }
 
-/** Call a sibling Edge Function via its HTTP URL using the service-role key. */
-async function callFunction(name: string, body: unknown, _userId: string): Promise<void> {
+/**
+ * Call a sibling Edge Function using the original user's JWT so that
+ * requireAuth() succeeds in the callee.
+ */
+async function callFunction(name: string, body: unknown, userToken: string): Promise<void> {
   const url = `${SUPABASE_URL}/functions/v1/${name}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // Use service role key so sibling functions trust this call
-      'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+      'Authorization': `Bearer ${userToken}`,
     },
     body: JSON.stringify(body),
   });
