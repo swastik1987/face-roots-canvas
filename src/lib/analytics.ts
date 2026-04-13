@@ -1,34 +1,21 @@
 /**
- * PostHog analytics — thin wrapper so we can swap providers later.
- * All calls are no-ops when VITE_POSTHOG_KEY is not set (local dev without analytics).
+ * PostHog analytics — stub until Phase 6.
+ * posthog-js will be added to package.json in Phase 6 when full
+ * funnel instrumentation is implemented.
  */
 
-let posthog: typeof import('posthog-js').default | null = null;
-
-export async function initAnalytics() {
-  const key = import.meta.env.VITE_POSTHOG_KEY as string | undefined;
-  if (!key) return;
-
-  const { default: ph } = await import('posthog-js');
-  ph.init(key, {
-    api_host: import.meta.env.VITE_POSTHOG_HOST ?? 'https://app.posthog.com',
-    autocapture: false,       // manual capture only — avoid leaking PII
-    capture_pageview: true,
-    persistence: 'localStorage',
-    loaded: instance => {
-      posthog = instance;
-    },
-  });
+export function initAnalytics(): void {
+  // Phase 6: import posthog-js and call ph.init(VITE_POSTHOG_KEY, {...})
 }
 
-export function identifyUser(userId: string) {
-  posthog?.identify(userId);
+export function identifyUser(_userId: string): void {
+  // Phase 6
 }
 
-export function captureEvent(name: string, properties?: Record<string, unknown>) {
-  posthog?.capture(name, properties);
+export function captureEvent(_name: string, _properties?: Record<string, unknown>): void {
+  // Phase 6
 }
 
-export function resetAnalytics() {
-  posthog?.reset();
+export function resetAnalytics(): void {
+  // Phase 6
 }

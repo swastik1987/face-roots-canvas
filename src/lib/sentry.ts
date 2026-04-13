@@ -1,37 +1,17 @@
 /**
- * Sentry error tracking — thin wrapper.
- * All calls are no-ops when VITE_SENTRY_DSN is not set.
+ * Sentry error tracking — stub until Phase 6.
+ * @sentry/react will be added to package.json in Phase 6 when full
+ * error monitoring is implemented for frontend + Edge Functions.
  */
 
-export async function initSentry() {
-  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-  if (!dsn) return;
-
-  const Sentry = await import('@sentry/react');
-  Sentry.init({
-    dsn,
-    release: import.meta.env.VITE_APP_VERSION ?? 'dev',
-    environment: import.meta.env.MODE,
-    tracesSampleRate: 0.1,
-    // Do not send PII
-    beforeSend(event) {
-      // Strip email from user context just in case
-      if (event.user) delete event.user.email;
-      return event;
-    },
-  });
+export function initSentry(): void {
+  // Phase 6: import @sentry/react and call Sentry.init({dsn: VITE_SENTRY_DSN, ...})
 }
 
-export async function setSentryUser(userId: string) {
-  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-  if (!dsn) return;
-  const Sentry = await import('@sentry/react');
-  Sentry.setUser({ id: userId });
+export function setSentryUser(_userId: string): void {
+  // Phase 6
 }
 
-export async function clearSentryUser() {
-  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-  if (!dsn) return;
-  const Sentry = await import('@sentry/react');
-  Sentry.setUser(null);
+export function clearSentryUser(): void {
+  // Phase 6
 }
