@@ -1,6 +1,8 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import { initAnalytics } from "./lib/analytics.ts";
+import { initSentry } from "./lib/sentry.ts";
 
 // Guard PWA service worker in iframe / preview contexts
 const isInIframe = (() => {
@@ -15,5 +17,9 @@ if (isPreviewHost || isInIframe) {
     regs.forEach((r) => r.unregister())
   );
 }
+
+// Initialise observability (no-ops when env vars are absent)
+initSentry();
+initAnalytics();
 
 createRoot(document.getElementById("root")!).render(<App />);

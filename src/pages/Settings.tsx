@@ -1,21 +1,86 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { User, Shield, Download, Trash2, ChevronRight } from 'lucide-react';
+import { User, Shield, Trash2, ChevronRight, Loader2, LogOut } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 
 const spring = { type: 'spring' as const, stiffness: 260, damping: 20 };
 
-const items = [
-  { icon: User, label: 'Profile', action: 'TODO: profile' },
-  { icon: Shield, label: 'Privacy controls', path: '/settings/privacy' },
-  { icon: Download, label: 'Export my data', action: 'TODO: export' },
-  { icon: Trash2, label: 'Delete my account', action: 'TODO: delete' },
-];
-
 const Settings = () => {
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    setDeleting(true);
+    setDeleteError('');
+
+    try {
+      // Phase 3 will replace this with the delete-my-data Edge Function.
+      // For now: write revoke consent event then delete the profile row
+      // (cascade will remove all child rows via FK).
+      await supabase.from('consent_events').insert({
+        user_id: user.id,
+        event_type: 'revoked',
+        scopes: { embeddings: false, raw_images: false, sharing: false },
+        policy_version: 'v1.0.0',
+        user_agent: navigator.userAgent,
+      });
+
+      // Stub — full erasure edge function ships in Phase 3.
+      // For now sign the user out; server-side deletion requires service role.
+      await signOut();
+      navigate('/', { replace: true });
+    } catch (err) {
+      setDeleteError('Something went wrong. Please try again.');
+      setDeleting(false);
+    }
+  };
+
+  const items = [
+    {
+      icon: User,
+      label: user?.email ?? 'Profile',
+      sublabel: 'Signed in',
+      onClick: () => {},
+    },
+    {
+      icon: Shield,
+      label: 'Privacy controls',
+      sublabel: 'Manage data & retention',
+      onClick: () => navigate('/settings/privacy'),
+    },
+    {
+      icon: LogOut,
+      label: 'Sign out',
+      sublabel: null,
+      onClick: signOut,
+    },
+    {
+      icon: Trash2,
+      label: 'Delete my account',
+      sublabel: 'Permanently erase all data',
+      onClick: () => setShowDeleteDialog(true),
+      danger: true,
+    },
+  ];
 
   return (
-    <div className="flex flex-col min-h-screen px-6 pt-12 gap-4">
+    <div className="flex flex-col min-h-screen px-6 pt-12 gap-4 pb-24">
       <motion.h1
         className="text-2xl font-bold"
         initial={{ opacity: 0 }}
@@ -29,18 +94,45 @@ const Settings = () => {
         {items.map((item, i) => (
           <motion.button
             key={item.label}
-            className="glass-card w-full p-4 flex items-center gap-3 hover:bg-white/10 transition-colors"
-            onClick={() => item.path ? navigate(item.path) : console.log(item.action)}
+            className={`glass-card w-full p-4 flex items-center gap-3 hover:bg-white/10 transition-colors ${item.danger ? 'border border-destructive/30' : ''}`}
+            onClick={item.onClick}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ ...spring, delay: i * 0.05 }}
           >
-            <item.icon size={20} className="text-muted-foreground" />
-            <span className="flex-1 text-left">{item.label}</span>
+            <item.icon size={20} className={item.danger ? 'text-destructive' : 'text-muted-foreground'} />
+            <div className="flex-1 text-left">
+              <div className={item.danger ? 'text-destructive text-sm font-medium' : 'text-sm font-medium'}>{item.label}</div>
+              {item.sublabel && <div className="text-xs text-muted-foreground">{item.sublabel}</div>}
+            </div>
             <ChevronRight size={16} className="text-muted-foreground" />
           </motion.button>
         ))}
       </div>
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent className="glass-card border-white/10">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              This will permanently erase all your photos, embeddings, analyses, and results.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && <p className="text-xs text-destructive px-1">{deleteError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={handleDeleteAccount}
+              disabled={deleting}
+            >
+              {deleting ? <Loader2 size={14} className="animate-spin mr-1" /> : null}
+              Yes, delete everything
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
