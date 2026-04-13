@@ -278,7 +278,7 @@ const FamilyAdd = () => {
               </Select>
             </div>
 
-            {errorMsg && phase !== 'error' && (
+            {errorMsg && (
               <p className="text-xs text-destructive">{errorMsg}</p>
             )}
 

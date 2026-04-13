@@ -317,7 +317,7 @@ const Capture = () => {
       {/* Step dots */}
       <div className="absolute bottom-28 inset-x-0 flex justify-center gap-3 z-10">
         {ANGLE_SEQUENCE.map((s, i) => {
-          const done = angleIndex > i || step === 'uploading' || step === 'done';
+          const done = angleIndex > i || step === 'uploading';
           const active = i === angleIndex;
           return <div key={s.angle} className={`w-2.5 h-2.5 rounded-full transition-all ${done ? 'bg-cyan' : active ? 'bg-white' : 'bg-white/30'}`} />;
         })}
