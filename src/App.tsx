@@ -3,8 +3,19 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import Index from "./pages/Index.tsx";
-import NotFound from "./pages/NotFound.tsx";
+import AppShell from "@/components/layout/AppShell";
+import Splash from "@/pages/Splash";
+import Auth from "@/pages/Auth";
+import Consent from "@/pages/Consent";
+import Home from "@/pages/Home";
+import Capture from "@/pages/Capture";
+import FamilyAdd from "@/pages/FamilyAdd";
+import AnalysisProgress from "@/pages/AnalysisProgress";
+import Results from "@/pages/Results";
+import SharePage from "@/pages/Share";
+import Settings from "@/pages/Settings";
+import SettingsPrivacy from "@/pages/SettingsPrivacy";
+import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
 
@@ -15,9 +26,20 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
+          <Route element={<AppShell />}>
+            <Route path="/" element={<Splash />} />
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/consent" element={<Consent />} />
+            <Route path="/home" element={<Home />} />
+            <Route path="/capture" element={<Capture />} />
+            <Route path="/family/add" element={<FamilyAdd />} />
+            <Route path="/analysis/:id" element={<AnalysisProgress />} />
+            <Route path="/results/:id" element={<Results />} />
+            <Route path="/results/:id/share" element={<SharePage />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/privacy" element={<SettingsPrivacy />} />
+            <Route path="*" element={<NotFound />} />
+          </Route>
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
