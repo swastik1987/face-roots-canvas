@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Webcam from 'react-webcam';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
 import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from '@/lib/face/detector';
 import { extractPose } from '@/lib/face/pose';
@@ -91,6 +92,7 @@ const ANGLE_SEQUENCE: AngleSpec[] = [
 const Capture = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const webcamRef = useRef<Webcam>(null);
   const rafRef = useRef<number>(0);
   const stableStartRef = useRef<number | null>(null);
@@ -307,6 +309,8 @@ const Capture = () => {
 
       clearFrames();
       captureEvent('capture_done');
+      // Invalidate persons cache so Home immediately shows the newly created self-person
+      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
       setStep('done');
     } catch (err) {
       console.error('[FaceBlame] Upload failed', err);

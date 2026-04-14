@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, User, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Plus, User, Loader2, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
@@ -25,18 +25,79 @@ function HomeSkeleton() {
   return (
     <div className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24" aria-busy="true" aria-label="Loading family tree">
       <Skeleton className="h-7 w-36 rounded-lg" />
-      {/* Self avatar skeleton */}
       <div className="flex flex-col items-center gap-2">
         <Skeleton className="w-24 h-24 rounded-full" />
         <Skeleton className="h-4 w-20 rounded" />
       </div>
-      {/* Card skeletons */}
       <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
         {[0, 1, 2, 3].map(i => (
           <Skeleton key={i} className="h-28 rounded-2xl" />
         ))}
       </div>
       <Skeleton className="h-12 w-52 rounded-full mt-4" />
+    </div>
+  );
+}
+
+// ── Self avatar ────────────────────────────────────────────────────────────────
+
+function SelfAvatar({
+  self,
+  thumbnailUrl,
+  onClick,
+}: {
+  self: Person | undefined;
+  thumbnailUrl: string | null;
+  onClick: () => void;
+}) {
+  const captured = !!self;
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <motion.div
+        className={`relative w-24 h-24 rounded-full overflow-hidden border-2 transition-colors ${
+          captured
+            ? 'border-cyan shadow-[0_0_16px_rgba(0,229,255,0.4)]'
+            : 'border-dashed border-white/20 bg-white/5'
+        }`}
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ ...spring, delay: 0.1 }}
+        onClick={captured ? undefined : onClick}
+        role={captured ? undefined : 'button'}
+        tabIndex={captured ? undefined : 0}
+        aria-label={captured ? `${self.display_name} — your photo` : 'Add your photo'}
+        onKeyDown={e => { if (!captured && e.key === 'Enter') onClick(); }}
+        style={{ cursor: captured ? 'default' : 'pointer' }}
+      >
+        {thumbnailUrl ? (
+          <img
+            src={thumbnailUrl}
+            alt={self?.display_name ?? 'You'}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <User size={36} className="text-muted-foreground" aria-hidden="true" />
+          </div>
+        )}
+
+        {/* Captured badge */}
+        {captured && (
+          <div className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-cyan flex items-center justify-center border-2 border-background">
+            <CheckCircle2 size={12} className="text-background" />
+          </div>
+        )}
+      </motion.div>
+
+      <span className="text-sm font-medium">
+        {captured ? self.display_name : (
+          <span className="text-muted-foreground">Add yourself</span>
+        )}
+      </span>
+      {captured && (
+        <span className="text-xs text-cyan/70">Captured ✓</span>
+      )}
     </div>
   );
 }
@@ -66,17 +127,41 @@ const Home = () => {
     },
   });
 
-  const [analyzing, setAnalyzing]   = useState(false);
-  const [analyzeError, setAnalyzeError] = useState('');
-
   const self   = persons.find(p => p.is_self);
   const family = persons.filter(p => !p.is_self);
+
+  // Fetch the self person's front-angle thumbnail (only when self exists)
+  const { data: selfThumbnailUrl = null } = useQuery<string | null>({
+    queryKey: ['self-thumbnail', self?.id],
+    enabled: !!self?.id,
+    staleTime: 300_000, // 5 min — signed URL is good for 15 min
+    queryFn: async () => {
+      const { data: images } = await supabase
+        .from('face_images')
+        .select('storage_path')
+        .eq('person_id', self!.id)
+        .eq('angle', 'front')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const path = images?.[0]?.storage_path;
+      if (!path) return null;
+
+      const { data } = await supabase.storage
+        .from('face-images-raw')
+        .createSignedUrl(path, 900); // 15 min
+      return data?.signedUrl ?? null;
+    },
+  });
+
+  const [analyzing, setAnalyzing]   = useState(false);
+  const [analyzeError, setAnalyzeError] = useState('');
 
   const canAnalyze = !!self && family.length >= 1;
 
   // Determine which empty slots still need to be filled
-  const filledTags  = new Set(family.map(p => p.relationship_tag));
-  const emptySlots  = EMPTY_SLOTS.filter(s => !filledTags.has(s.tag));
+  const filledTags = new Set(family.map(p => p.relationship_tag));
+  const emptySlots = EMPTY_SLOTS.filter(s => !filledTags.has(s.tag));
 
   const startAnalysis = async () => {
     if (!self || !user) return;
@@ -141,25 +226,11 @@ const Home = () => {
       </motion.h1>
 
       {/* Self avatar */}
-      <div className="flex flex-col items-center gap-2">
-        <motion.div
-          className="w-24 h-24 rounded-full bg-white/5 border-2 border-dashed border-white/20 flex items-center justify-center overflow-hidden focus-visible:ring-2 focus-visible:ring-cyan focus-visible:outline-none"
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ ...spring, delay: 0.1 }}
-          onClick={() => !self && navigate('/capture')}
-          role={self ? undefined : 'button'}
-          tabIndex={self ? undefined : 0}
-          aria-label={self ? `${self.display_name} — your photo` : 'Add your photo'}
-          onKeyDown={e => { if (!self && e.key === 'Enter') navigate('/capture'); }}
-          style={{ cursor: self ? 'default' : 'pointer' }}
-        >
-          <User size={36} className="text-muted-foreground" aria-hidden="true" />
-        </motion.div>
-        <span className="text-sm text-muted-foreground">
-          {self ? self.display_name : 'Add yourself'}
-        </span>
-      </div>
+      <SelfAvatar
+        self={self}
+        thumbnailUrl={selfThumbnailUrl}
+        onClick={() => navigate('/capture')}
+      />
 
       {/* Family members already added */}
       {family.length > 0 && (
@@ -173,9 +244,7 @@ const Home = () => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring, delay: 0.15 + i * 0.05 }}
             >
-              <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center" aria-hidden="true">
-                <User size={20} className="text-muted-foreground" />
-              </div>
+              <FamilyMemberAvatar person={person} />
               <span className="text-xs font-medium text-center leading-tight">{person.display_name}</span>
               <span className="text-xs text-muted-foreground capitalize">
                 {person.relationship_tag.replace(/_/g, ' ')}
@@ -232,5 +301,40 @@ const Home = () => {
     </main>
   );
 };
+
+// ── Family member avatar with thumbnail ───────────────────────────────────────
+
+function FamilyMemberAvatar({ person }: { person: Person }) {
+  const { data: thumbnailUrl } = useQuery<string | null>({
+    queryKey: ['family-thumbnail', person.id],
+    staleTime: 300_000,
+    queryFn: async () => {
+      const { data: images } = await supabase
+        .from('face_images')
+        .select('storage_path')
+        .eq('person_id', person.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const path = images?.[0]?.storage_path;
+      if (!path) return null;
+
+      const { data } = await supabase.storage
+        .from('face-images-raw')
+        .createSignedUrl(path, 900);
+      return data?.signedUrl ?? null;
+    },
+  });
+
+  return (
+    <div className="w-14 h-14 rounded-full overflow-hidden border border-white/15 bg-white/10 flex items-center justify-center">
+      {thumbnailUrl ? (
+        <img src={thumbnailUrl} alt={person.display_name} className="w-full h-full object-cover" />
+      ) : (
+        <User size={22} className="text-muted-foreground" aria-hidden="true" />
+      )}
+    </div>
+  );
+}
 
 export default Home;
