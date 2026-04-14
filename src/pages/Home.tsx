@@ -74,7 +74,7 @@ function SelfAvatar({
           <img
             src={thumbnailUrl}
             alt={self?.display_name ?? 'You'}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover object-top"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -329,7 +329,7 @@ function FamilyMemberAvatar({ person }: { person: Person }) {
   return (
     <div className="w-14 h-14 rounded-full overflow-hidden border border-white/15 bg-white/10 flex items-center justify-center">
       {thumbnailUrl ? (
-        <img src={thumbnailUrl} alt={person.display_name} className="w-full h-full object-cover" />
+        <img src={thumbnailUrl} alt={person.display_name} className="w-full h-full object-cover object-top" />
       ) : (
         <User size={22} className="text-muted-foreground" aria-hidden="true" />
       )}
