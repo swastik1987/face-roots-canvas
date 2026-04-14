@@ -151,26 +151,31 @@ const Capture = () => {
     }
 
     const facesFound = (result.faceLandmarks?.length ?? 0) > 0;
-    setHasFace(facesFound);
 
+    // Check face is present before any other work
     if (!facesFound) {
+      setHasFace(false);
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
       return;
     }
 
-    // Face size guard
+    // Face size guard — filters background false-positives
     const lms = result.faceLandmarks[0];
     const xs = lms.map(l => l.x), ys = lms.map(l => l.y);
     const faceArea =
       (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
     if (faceArea < MIN_FACE_RATIO) {
+      setHasFace(false);
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
       return;
     }
+
+    // Only show "Face detected" once we pass both guards
+    setHasFace(true);
 
     const pose = extractPose(result);
     if (!pose) {
