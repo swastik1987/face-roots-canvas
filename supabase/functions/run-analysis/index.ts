@@ -158,6 +158,65 @@ async function runPipeline(
     await setStatus('embedding');
     await embedAllPersons(userId, userToken, db);
 
+    // Verify self has feature embeddings before proceeding — embedAllPersons
+    // catches errors per-image to avoid one bad image blocking everything,
+    // but if ALL images failed we need to stop here with a clear message.
+    const { data: analysisRow } = await db
+      .from('analyses')
+      .select('self_person_id')
+      .eq('id', analysisId)
+      .single();
+
+    const { count: selfEmbeddingCount } = await db
+      .from('feature_embeddings')
+      .select('*', { count: 'exact', head: true })
+      .eq('person_id', analysisRow!.self_person_id);
+
+    if (!selfEmbeddingCount || selfEmbeddingCount === 0) {
+      // Check what went wrong to give a useful error
+      const { data: selfImages } = await db
+        .from('face_images')
+        .select('id')
+        .eq('person_id', analysisRow!.self_person_id);
+
+      const imageIds = selfImages?.map(i => i.id) ?? [];
+      let reason = 'No face images found for self.';
+
+      if (imageIds.length > 0) {
+        const { count: landmarkCount } = await db
+          .from('face_landmarks')
+          .select('*', { count: 'exact', head: true })
+          .in('face_image_id', imageIds);
+
+        if (!landmarkCount || landmarkCount === 0) {
+          reason = 'Face landmarks are missing — please re-capture your photo.';
+        } else {
+          reason = 'Feature crops or embeddings could not be generated — please try re-capturing your photo.';
+        }
+      }
+
+      throw new Error(reason);
+    }
+
+    // Also verify at least one family member has embeddings
+    const { data: familyPersons } = await db
+      .from('persons')
+      .select('id')
+      .eq('owner_user_id', userId)
+      .eq('is_self', false);
+
+    if (familyPersons && familyPersons.length > 0) {
+      const familyIds = familyPersons.map(p => p.id);
+      const { count: familyEmbeddingCount } = await db
+        .from('feature_embeddings')
+        .select('*', { count: 'exact', head: true })
+        .in('person_id', familyIds);
+
+      if (!familyEmbeddingCount || familyEmbeddingCount === 0) {
+        throw new Error('Feature embeddings could not be generated for your family members — please re-upload their photos.');
+      }
+    }
+
     // ── Stage: matching ───────────────────────────────────────────────────────
     await setStatus('matching');
     await callFunction('match-features', { analysis_id: analysisId }, userToken);
