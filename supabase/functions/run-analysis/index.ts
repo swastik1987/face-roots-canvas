@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
       userId,
       action: 'run_analysis',
       windowSecs: 86400,
-      maxCalls: isPro ? 30 : 3,
+      maxCalls: isPro ? 30 : 10,
     });
 
     // Verify self_person_id belongs to this user and is_self
