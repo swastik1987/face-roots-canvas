@@ -413,6 +413,102 @@ export type Database = {
         }
         Relationships: []
       }
+      sibling_analyses: {
+        Row: {
+          analysis_a_id: string
+          analysis_b_id: string
+          created_at: string
+          error_message: string | null
+          id: string
+          owner_user_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          analysis_a_id: string
+          analysis_b_id: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          owner_user_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          analysis_a_id?: string
+          analysis_b_id?: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          owner_user_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sibling_analyses_analysis_a_id_fkey"
+            columns: ["analysis_a_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sibling_analyses_analysis_b_id_fkey"
+            columns: ["analysis_b_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sibling_feature_deltas: {
+        Row: {
+          created_at: string
+          delta: number | null
+          feature_type: string
+          id: string
+          shared_person_id: string
+          sibling_analysis_id: string
+          similarity_a: number
+          similarity_b: number
+        }
+        Insert: {
+          created_at?: string
+          delta?: number | null
+          feature_type: string
+          id?: string
+          shared_person_id: string
+          sibling_analysis_id: string
+          similarity_a: number
+          similarity_b: number
+        }
+        Update: {
+          created_at?: string
+          delta?: number | null
+          feature_type?: string
+          id?: string
+          shared_person_id?: string
+          sibling_analysis_id?: string
+          similarity_a?: number
+          similarity_b?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sibling_feature_deltas_shared_person_id_fkey"
+            columns: ["shared_person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sibling_feature_deltas_sibling_analysis_id_fkey"
+            columns: ["sibling_analysis_id"]
+            isOneToOne: false
+            referencedRelation: "sibling_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       verdict_cache: {
         Row: {
           created_at: string | null
