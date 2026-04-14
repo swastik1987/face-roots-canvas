@@ -494,8 +494,7 @@ const Capture = () => {
       <div className="absolute bottom-28 inset-x-0 flex justify-center gap-3 z-10">
         {ANGLE_SEQUENCE.map((s, i) => {
           const done = angleIndex > i ||
-            step === 'uploading' ||
-            step === 'done';
+            step === 'uploading';
           const active = i === angleIndex;
           return (
             <div
