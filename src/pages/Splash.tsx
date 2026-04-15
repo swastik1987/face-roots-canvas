@@ -77,12 +77,6 @@ const Splash = () => {
           >
             Blame someone <ArrowRight size={18} />
           </motion.button>
-          <button
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
-            onClick={() => navigate('/auth')}
-          >
-            Sign in
-          </button>
         </motion.div>
 
         {/* Stats row */}
