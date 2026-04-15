@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw } from 'lucide-react';
 import { initDetector, setRunningMode, detectImage } from '@/lib/face/detector';
+import { cropAndUploadFeatures } from '@/lib/face/uploadCrops';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
@@ -108,6 +109,7 @@ const FamilyAdd = () => {
   const [cropUrl, setCropUrl]     = useState('');     // cropped face data URL
   const [cropBlob, setCropBlob]   = useState<Blob | null>(null);
   const [originalBlob, setOriginalBlob] = useState<Blob | null>(null);
+  const [originalImg, setOriginalImg] = useState<HTMLImageElement | null>(null);
   const [detectionResult, setDetectionResult] = useState<FaceLandmarkerResult | null>(null);
   const [bboxPercent, setBboxPercent] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [name, setName]           = useState('');
@@ -151,6 +153,7 @@ const FamilyAdd = () => {
         img.onload = () => resolve();
         img.onerror = () => reject(new Error('Image failed to load'));
       });
+      setOriginalImg(img);
 
       const result = detectImage(img);
       const numFaces = result.faceLandmarks?.length ?? 0;
@@ -243,6 +246,23 @@ const FamilyAdd = () => {
         },
       });
 
+      // Crop features client-side and upload to feature-crops bucket.
+      // Uses the ORIGINAL full image (not the face-cropped version) since
+      // landmarks reference the original image coordinates.
+      if (originalImg && detectionResult) {
+        try {
+          await cropAndUploadFeatures(
+            person.id,
+            imgRow.id,
+            originalImg,
+            detectionResult,
+            'front',
+          );
+        } catch (cropErr) {
+          console.warn('[FamilyAdd] Feature crop upload failed:', cropErr);
+        }
+      }
+
       // Invalidate persons cache so Home re-fetches immediately
       await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
 
@@ -261,6 +281,7 @@ const FamilyAdd = () => {
     setCropUrl('');
     setCropBlob(null);
     setOriginalBlob(null);
+    setOriginalImg(null);
     setDetectionResult(null);
     setBboxPercent(null);
     setErrorMsg('');

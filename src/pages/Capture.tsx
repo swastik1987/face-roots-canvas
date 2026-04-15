@@ -24,6 +24,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
 import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from '@/lib/face/detector';
 import { extractPose } from '@/lib/face/pose';
+import { cropAndUploadFeatures, loadImageFromDataUrl } from '@/lib/face/uploadCrops';
 import { useFaceStore } from '@/stores/faceStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -305,6 +306,23 @@ const Capture = () => {
             matrix: matrixArr,
           },
         });
+
+        // Crop features client-side and upload to feature-crops bucket.
+        // This runs in the browser using Canvas API (no OffscreenCanvas needed).
+        // run-analysis will find these crops via storage listing.
+        try {
+          const sourceImg = await loadImageFromDataUrl(frame.imageDataUrl);
+          await cropAndUploadFeatures(
+            selfPerson.id,
+            imgRow.id,
+            sourceImg,
+            frame.landmarkResult,
+            frame.angle,
+          );
+        } catch (cropErr) {
+          // Non-fatal: analysis can still attempt server-side cropping
+          console.warn('[Capture] Feature crop upload failed:', cropErr);
+        }
       }
 
       clearFrames();

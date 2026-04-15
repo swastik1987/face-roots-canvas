@@ -246,10 +246,17 @@ async function runPipeline(
 
 /**
  * For every person owned by this user, for every face image:
- * 1. Call embed-face (holistic InsightFace embedding) — idempotent
- * 2. Crop feature regions using OffscreenCanvas + landmarks
- * 3. Upload crops to feature-crops bucket
- * 4. Call embed-features (DINOv2 per-crop) — idempotent per crop
+ * 1. Look up feature crops already uploaded by the client (Canvas API)
+ * 2. Call embed-features (CLIP per-crop) — idempotent per crop
+ *
+ * Feature cropping is done client-side in the browser (Capture.tsx /
+ * FamilyAdd.tsx) using the Canvas API. The crops are uploaded to the
+ * `feature-crops` bucket under `{person_id}/{face_image_id}/`.
+ * This function lists those crops and sends them to embed-features.
+ *
+ * NOTE: embed-face (holistic InsightFace embedding) is skipped because
+ * face_embeddings are NOT used in the matching pipeline. match-features
+ * queries feature_embeddings only (per-crop CLIP).
  */
 async function embedAllPersons(
   userId: string,
@@ -272,11 +279,6 @@ async function embedAllPersons(
     if (!images?.length) continue;
 
     for (const image of images) {
-      // NOTE: embed-face (holistic InsightFace embedding) is skipped here
-      // because face_embeddings are NOT used in the matching pipeline.
-      // match-features queries feature_embeddings only (per-crop DINOv2/CLIP).
-      // This removes a failure point and speeds up the pipeline.
-
       // ── Step 1: check if feature embeddings already done ───────────────────
       const { count: existingCount } = await db
         .from('feature_embeddings')
@@ -288,35 +290,38 @@ async function embedAllPersons(
         continue;
       }
 
-      // ── Step 3: get landmarks ──────────────────────────────────────────────
-      const { data: landmarkRow } = await db
-        .from('face_landmarks')
-        .select('landmarks_json')
-        .eq('face_image_id', image.id)
-        .maybeSingle();
+      // ── Step 2: list existing feature crops from storage ───────────────────
+      // Crops are uploaded client-side to: feature-crops/{person_id}/{face_image_id}/
+      const cropPrefix = `${person.id}/${image.id}`;
+      let crops: Array<{ feature_type: string; storage_path: string }> = [];
 
-      if (!landmarkRow) {
-        console.warn(`[run-analysis] no landmarks for face_image ${image.id} — skipping feature crop`);
+      try {
+        const { data: cropFiles, error: listErr } = await db.storage
+          .from('feature-crops')
+          .list(cropPrefix);
+
+        if (listErr) {
+          console.warn(`[run-analysis] Failed to list crops at ${cropPrefix}:`, listErr.message);
+        }
+
+        crops = (cropFiles ?? [])
+          .filter(f => f.name.endsWith('.png'))
+          .map(f => ({
+            feature_type: f.name.replace('.png', ''),
+            storage_path: `${cropPrefix}/${f.name}`,
+          }));
+      } catch (err) {
+        console.warn(`[run-analysis] Error listing crops for ${image.id}:`, err);
+      }
+
+      if (crops.length === 0) {
+        console.warn(`[run-analysis] No feature crops found for face_image ${image.id} — client may not have uploaded them. Skipping.`);
         continue;
       }
 
-      // ── Step 4: crop features server-side and upload ───────────────────────
-      let crops: Array<{ feature_type: string; storage_path: string }> = [];
-      try {
-        crops = await cropAndUploadFeatures(
-          image.id,
-          image.storage_path,
-          landmarkRow.landmarks_json,
-          person.id,
-          db,
-        );
-      } catch (err) {
-        console.warn(`[run-analysis] feature crop failed for ${image.id}:`, err);
-      }
+      console.log(`[run-analysis] Found ${crops.length} crops for face_image ${image.id}`);
 
-      if (crops.length === 0) continue;
-
-      // ── Step 5: generate DINOv2 embeddings for each crop ──────────────────
+      // ── Step 3: generate CLIP embeddings for each crop ─────────────────────
       try {
         await callFunction('embed-features', { face_image_id: image.id, crops }, userToken);
       } catch (err) {
@@ -324,105 +329,6 @@ async function embedAllPersons(
       }
     }
   }
-}
-
-/**
- * Download a face image from storage, extract landmark coordinates, crop each
- * feature region using OffscreenCanvas, and upload the crops to the
- * `feature-crops` bucket.
- *
- * Returns the list of { feature_type, storage_path } for successfully uploaded
- * crops, so the caller can pass them straight to embed-features.
- *
- * Requires Deno 1.37+ (OffscreenCanvas + createImageBitmap).
- */
-async function cropAndUploadFeatures(
-  faceImageId: string,
-  storagePath: string,
-  landmarksJson: unknown,
-  personId: string,
-  db: ReturnType<typeof getAdminClient>,
-): Promise<Array<{ feature_type: string; storage_path: string }>> {
-  // Download the source image
-  const { data: imageBlob, error: dlErr } = await db.storage
-    .from('face-images-raw')
-    .download(storagePath);
-
-  if (dlErr || !imageBlob) {
-    throw new Error(`Failed to download face image ${storagePath}: ${dlErr?.message}`);
-  }
-
-  // Normalise landmarks: FamilyAdd stores { landmarks, matrix, bbox }
-  // Capture may store the same or a bare array.
-  let landmarks: Array<{ x: number; y: number; z: number }>;
-  if (Array.isArray(landmarksJson)) {
-    landmarks = landmarksJson as Array<{ x: number; y: number; z: number }>;
-  } else if (landmarksJson && typeof landmarksJson === 'object' && 'landmarks' in (landmarksJson as object)) {
-    landmarks = (landmarksJson as { landmarks: Array<{ x: number; y: number; z: number }> }).landmarks;
-  } else {
-    throw new Error('Unrecognised landmarks_json format');
-  }
-
-  if (!landmarks?.length) throw new Error('Empty landmarks array');
-
-  // Decode image → ImageBitmap
-  const imageBitmap = await createImageBitmap(imageBlob);
-  const { width, height } = imageBitmap;
-
-  const crops: Array<{ feature_type: string; storage_path: string }> = [];
-
-  try {
-    for (const [featureType, indices] of Object.entries(FEATURE_REGIONS)) {
-      // Validate indices are within bounds
-      const validIndices = indices.filter(i => i < landmarks.length);
-      if (validIndices.length < 2) continue;
-
-      // Convert normalised landmark coords → pixel space
-      const xs = validIndices.map(i => landmarks[i].x * width);
-      const ys = validIndices.map(i => landmarks[i].y * height);
-
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-
-      const bw = maxX - minX;
-      const bh = maxY - minY;
-      if (bw < 4 || bh < 4) continue; // degenerate — skip
-
-      // 15% padding on each side (from CLAUDE.md §6.2)
-      const pad = 0.15;
-      const sx = Math.max(0, minX - bw * pad);
-      const sy = Math.max(0, minY - bh * pad);
-      const sw = Math.min(width - sx, bw * (1 + 2 * pad));
-      const sh = Math.min(height - sy, bh * (1 + 2 * pad));
-
-      if (sw < 4 || sh < 4) continue;
-
-      // Draw crop to 224×224 OffscreenCanvas
-      const canvas = new OffscreenCanvas(224, 224);
-      const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(imageBitmap, sx, sy, sw, sh, 0, 0, 224, 224);
-      const cropBlob = await canvas.convertToBlob({ type: 'image/png' });
-
-      // Upload to feature-crops bucket
-      const cropPath = `${personId}/${faceImageId}/${featureType}.png`;
-      const { error: upErr } = await db.storage
-        .from('feature-crops')
-        .upload(cropPath, cropBlob, { contentType: 'image/png', upsert: true });
-
-      if (upErr) {
-        console.warn(`[run-analysis] failed to upload crop ${cropPath}:`, upErr.message);
-        continue;
-      }
-
-      crops.push({ feature_type: featureType, storage_path: cropPath });
-    }
-  } finally {
-    imageBitmap.close();
-  }
-
-  return crops;
 }
 
 /**
