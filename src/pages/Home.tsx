@@ -350,11 +350,14 @@ const Home = () => {
     setAnalyzeStatus('Preparing feature crops…');
     captureEvent('analysis_started', { self_person_id: self.id });
     try {
-      // Ensure all face images have feature crops in storage.
-      // This backfills any images that were captured before the crop
-      // upload fix, using stored landmarks + client-side Canvas API.
+      // Ensure all face images have feature crops + CLIP embeddings.
+      // This backfills any images missing crops/embeddings by:
+      // 1. Generating crops client-side from stored landmarks
+      // 2. Uploading to feature-crops bucket
+      // 3. Calling embed-features to generate CLIP embeddings
+      // After this, run-analysis finds existing embeddings and skips crop listing.
       await ensureAllCropsUploaded((done, total) => {
-        setAnalyzeStatus(`Preparing crops… ${done}/${total}`);
+        setAnalyzeStatus(`Preparing features… ${done}/${total}`);
       });
 
       setAnalyzeStatus('Starting analysis…');

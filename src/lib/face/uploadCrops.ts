@@ -124,13 +124,15 @@ export function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement>
 
 /**
  * Pre-analysis backfill: ensure every face image owned by the current user
- * has feature crops uploaded. Uses stored landmarks from the DB + Canvas API
- * to generate crops client-side for any images that are missing them.
+ * has feature embeddings. Uses stored landmarks from the DB + Canvas API
+ * to generate crops client-side, uploads them, then calls embed-features
+ * to generate CLIP embeddings — all before run-analysis starts.
  *
- * Call this BEFORE starting run-analysis so the server finds crops in storage.
+ * This means run-analysis finds existing embeddings and skips crop listing,
+ * making it immune to any path mismatch between client and server.
  *
- * @param onProgress  Optional callback for UI feedback (imagesProcessed, totalImages)
- * @returns Number of images that had crops generated
+ * @param onProgress  Optional callback for UI feedback
+ * @returns Number of images that had embeddings generated
  */
 export async function ensureAllCropsUploaded(
   onProgress?: (done: number, total: number) => void,
@@ -138,6 +140,12 @@ export async function ensureAllCropsUploaded(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     console.warn('[backfill] No authenticated user');
+    return 0;
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    console.warn('[backfill] No session');
     return 0;
   }
 
@@ -149,7 +157,7 @@ export async function ensureAllCropsUploaded(
 
   if (!persons?.length) return 0;
 
-  // Fetch all face images with their landmarks
+  // Fetch all face images
   const personIds = persons.map(p => p.id);
   const { data: images } = await supabase
     .from('face_images')
@@ -158,12 +166,23 @@ export async function ensureAllCropsUploaded(
 
   if (!images?.length) return 0;
 
-  // For each image, check if crops already exist
   let processed = 0;
-  let total = images.length;
+  const total = images.length;
 
   for (const img of images) {
     onProgress?.(processed, total);
+
+    // Check if this image already has enough embeddings in DB
+    const { count: embCount } = await supabase
+      .from('feature_embeddings')
+      .select('*', { count: 'exact', head: true })
+      .eq('face_image_id', img.id);
+
+    if (embCount && embCount >= 8) {
+      // Already has embeddings — skip entirely
+      processed++;
+      continue;
+    }
 
     // Check if crops exist in storage
     const cropPrefix = `${user.id}/${img.person_id}/${img.id}`;
@@ -171,83 +190,119 @@ export async function ensureAllCropsUploaded(
       .from('feature-crops')
       .list(cropPrefix);
 
-    const pngCount = (existing ?? []).filter(f => f.name.endsWith('.png')).length;
-    if (pngCount >= 8) {
-      // Already has enough crops — skip
-      processed++;
-      continue;
+    const existingPngs = (existing ?? []).filter(f => f.name.endsWith('.png'));
+    let uploadedCrops: Array<{ feature_type: string; storage_path: string }> = [];
+
+    if (existingPngs.length >= 8) {
+      // Crops exist but embeddings don't — build crop list from storage
+      uploadedCrops = existingPngs.map(f => ({
+        feature_type: f.name.replace('.png', ''),
+        storage_path: `${cropPrefix}/${f.name}`,
+      }));
+    } else {
+      // Need to generate crops from landmarks
+      const { data: lmRow } = await supabase
+        .from('face_landmarks')
+        .select('landmarks_json')
+        .eq('face_image_id', img.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!lmRow?.landmarks_json) {
+        console.warn(`[backfill] No landmarks for image ${img.id} — skipping`);
+        processed++;
+        continue;
+      }
+
+      const stored = lmRow.landmarks_json as {
+        landmarks?: Array<{ x: number; y: number; z?: number; visibility?: number }>;
+      };
+
+      if (!stored.landmarks?.length) {
+        console.warn(`[backfill] Empty landmarks for image ${img.id}`);
+        processed++;
+        continue;
+      }
+
+      // Download the face image from storage
+      const { data: signedData } = await supabase.storage
+        .from('face-images-raw')
+        .createSignedUrl(img.storage_path, 300);
+
+      if (!signedData?.signedUrl) {
+        console.warn(`[backfill] No signed URL for image ${img.id}`);
+        processed++;
+        continue;
+      }
+
+      let imgEl: HTMLImageElement;
+      try {
+        imgEl = await loadImageFromSignedUrl(signedData.signedUrl);
+      } catch {
+        console.warn(`[backfill] Failed to load image ${img.id}`);
+        processed++;
+        continue;
+      }
+
+      // Reconstruct FaceLandmarkerResult from stored landmarks
+      const mockResult: FaceLandmarkerResult = {
+        faceLandmarks: [stored.landmarks.map(lm => ({
+          x: lm.x,
+          y: lm.y,
+          z: lm.z ?? 0,
+          visibility: lm.visibility ?? 0,
+        }))],
+        faceBlendshapes: [],
+        facialTransformationMatrixes: [],
+      };
+
+      const angle = (img.angle as 'front' | 'left' | 'right') || 'front';
+
+      try {
+        uploadedCrops = await cropAndUploadFeatures(
+          img.person_id,
+          img.id,
+          imgEl,
+          mockResult,
+          angle,
+        );
+        console.log(`[backfill] Image ${img.id}: uploaded ${uploadedCrops.length} crops`);
+      } catch (err) {
+        console.warn(`[backfill] Crop failed for image ${img.id}:`, err);
+        processed++;
+        continue;
+      }
     }
 
-    // Fetch landmarks from DB
-    const { data: lmRow } = await supabase
-      .from('face_landmarks')
-      .select('landmarks_json')
-      .eq('face_image_id', img.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Call embed-features to generate CLIP embeddings from the uploaded crops.
+    // This uses the admin client server-side, so it reads crops regardless of
+    // which storage path scheme the run-analysis function expects.
+    if (uploadedCrops.length > 0) {
+      try {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const res = await fetch(`${supabaseUrl}/functions/v1/embed-features`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            face_image_id: img.id,
+            crops: uploadedCrops,
+          }),
+        });
 
-    if (!lmRow?.landmarks_json) {
-      console.warn(`[backfill] No landmarks for image ${img.id} — skipping`);
-      processed++;
-      continue;
-    }
-
-    const stored = lmRow.landmarks_json as {
-      landmarks?: Array<{ x: number; y: number; z?: number; visibility?: number }>;
-    };
-
-    if (!stored.landmarks?.length) {
-      console.warn(`[backfill] Empty landmarks for image ${img.id}`);
-      processed++;
-      continue;
-    }
-
-    // Download the face image from storage
-    const { data: signedData } = await supabase.storage
-      .from('face-images-raw')
-      .createSignedUrl(img.storage_path, 300);
-
-    if (!signedData?.signedUrl) {
-      console.warn(`[backfill] No signed URL for image ${img.id}`);
-      processed++;
-      continue;
-    }
-
-    let imgEl: HTMLImageElement;
-    try {
-      imgEl = await loadImageFromSignedUrl(signedData.signedUrl);
-    } catch {
-      console.warn(`[backfill] Failed to load image ${img.id}`);
-      processed++;
-      continue;
-    }
-
-    // Reconstruct a FaceLandmarkerResult from stored landmarks
-    const mockResult: FaceLandmarkerResult = {
-      faceLandmarks: [stored.landmarks.map(lm => ({
-        x: lm.x,
-        y: lm.y,
-        z: lm.z ?? 0,
-        visibility: lm.visibility ?? 0,
-      }))],
-      faceBlendshapes: [],
-      facialTransformationMatrixes: [],
-    };
-
-    const angle = (img.angle as 'front' | 'left' | 'right') || 'front';
-
-    try {
-      const uploaded = await cropAndUploadFeatures(
-        img.person_id,
-        img.id,
-        imgEl,
-        mockResult,
-        angle,
-      );
-      console.log(`[backfill] Image ${img.id}: uploaded ${uploaded.length} crops`);
-    } catch (err) {
-      console.warn(`[backfill] Crop failed for image ${img.id}:`, err);
+        if (!res.ok) {
+          const errText = await res.text().catch(() => 'unknown');
+          console.warn(`[backfill] embed-features failed for ${img.id}: ${res.status} ${errText}`);
+        } else {
+          const result = await res.json();
+          console.log(`[backfill] Image ${img.id}: embedded ${result.count} features`);
+        }
+      } catch (err) {
+        console.warn(`[backfill] embed-features call failed for ${img.id}:`, err);
+      }
     }
 
     processed++;
