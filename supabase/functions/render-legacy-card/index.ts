@@ -193,7 +193,7 @@ Deno.serve(async (req) => {
       isPro,
     });
 
-    const svg = await satori(element, {
+    const svg = await (satori as any)(element, {
       width: 1080,
       height: 1920,
       fonts,
