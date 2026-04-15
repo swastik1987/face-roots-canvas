@@ -79,28 +79,50 @@ Deno.serve(async (req) => {
   }
 });
 
-/** List and delete all objects in `bucket` under the `userId/` prefix. */
+/** Recursively list and delete all objects in `bucket` under the `userId/` prefix. */
 async function purgeUserStorage(
   db: ReturnType<typeof import('../_shared/supabaseAdmin.ts').getAdminClient>,
   userId: string,
   bucket: string,
+): Promise<number> {
+  return purgeDirectory(db, bucket, userId);
+}
+
+/** Walk a storage directory recursively, deleting all files found. */
+async function purgeDirectory(
+  db: ReturnType<typeof import('../_shared/supabaseAdmin.ts').getAdminClient>,
+  bucket: string,
+  prefix: string,
 ): Promise<number> {
   let deleted = 0;
   let offset = 0;
   const limit = 100;
 
   while (true) {
-    const { data: files } = await db.storage
+    const { data: entries } = await db.storage
       .from(bucket)
-      .list(userId, { limit, offset });
+      .list(prefix, { limit, offset });
 
-    if (!files || files.length === 0) break;
+    if (!entries || entries.length === 0) break;
 
-    const paths = files.map(f => `${userId}/${f.name}`);
-    const { data: removed } = await db.storage.from(bucket).remove(paths);
-    deleted += removed?.length ?? 0;
+    // Separate files from folders — Supabase storage list returns
+    // folders as entries with id=null and no metadata
+    const files = entries.filter(e => e.id !== null);
+    const folders = entries.filter(e => e.id === null);
 
-    if (files.length < limit) break;
+    // Delete files in this directory
+    if (files.length > 0) {
+      const paths = files.map(f => `${prefix}/${f.name}`);
+      const { data: removed } = await db.storage.from(bucket).remove(paths);
+      deleted += removed?.length ?? 0;
+    }
+
+    // Recurse into subdirectories
+    for (const folder of folders) {
+      deleted += await purgeDirectory(db, bucket, `${prefix}/${folder.name}`);
+    }
+
+    if (entries.length < limit) break;
     offset += limit;
   }
 
