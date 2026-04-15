@@ -5,6 +5,9 @@
  * Canvas API (which works everywhere — unlike OffscreenCanvas in Deno)
  * to crop each facial feature region and upload the crops to the
  * `feature-crops` bucket so that run-analysis can find them server-side.
+ *
+ * Storage path: {userId}/{personId}/{faceImageId}/{featureType}.png
+ * The userId prefix is required by the bucket's RLS policy.
  */
 
 import { supabase } from '@/lib/supabase';
