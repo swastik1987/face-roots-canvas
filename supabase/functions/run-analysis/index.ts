@@ -272,14 +272,12 @@ async function embedAllPersons(
     if (!images?.length) continue;
 
     for (const image of images) {
-      // ── Step 1: holistic face embedding (InsightFace, idempotent) ──────────
-      try {
-        await callFunction('embed-face', { face_image_id: image.id }, userToken);
-      } catch (err) {
-        console.warn(`[run-analysis] embed-face failed for ${image.id}:`, err);
-      }
+      // NOTE: embed-face (holistic InsightFace embedding) is skipped here
+      // because face_embeddings are NOT used in the matching pipeline.
+      // match-features queries feature_embeddings only (per-crop DINOv2/CLIP).
+      // This removes a failure point and speeds up the pipeline.
 
-      // ── Step 2: check if feature embeddings already done ───────────────────
+      // ── Step 1: check if feature embeddings already done ───────────────────
       const { count: existingCount } = await db
         .from('feature_embeddings')
         .select('*', { count: 'exact', head: true })
@@ -430,21 +428,42 @@ async function cropAndUploadFeatures(
 /**
  * Call a sibling Edge Function using the original user's JWT so that
  * requireAuth() succeeds in the callee.
+ *
+ * Includes a 120-second timeout via AbortController to prevent the
+ * pipeline from hanging indefinitely on a slow/stuck sub-function.
  */
-async function callFunction(name: string, body: unknown, userToken: string): Promise<void> {
+async function callFunction(
+  name: string,
+  body: unknown,
+  userToken: string,
+  timeoutMs = 120_000,
+): Promise<void> {
   const url = `${SUPABASE_URL}/functions/v1/${name}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${userToken}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => 'no body');
-    throw new Error(`Function ${name} failed (${res.status}): ${text}`);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${userToken}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => 'no body');
+      throw new Error(`Function ${name} failed (${res.status}): ${text}`);
+    }
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      throw new Error(`Function ${name} timed out after ${timeoutMs / 1000}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

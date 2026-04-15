@@ -1,9 +1,10 @@
 /**
- * embed-features — generate per-feature DINOv2 384-dim embeddings.
+ * embed-features — generate per-feature CLIP 768-dim embeddings.
  *
  * Input:  { face_image_id, crops: [{feature_type, storage_path}, ...] }
  * Output: { count: number }
  *
+ * Uses andreasjansson/clip-features on Replicate (ViT-L/14, 768-dim).
  * Fans out with Promise.all (capped at concurrency 4).
  * Retries each crop up to 3× with exponential back-off.
  */
@@ -14,9 +15,9 @@ import { captureException } from '../_shared/sentry.ts';
 import { EmbedFeaturesInput } from '../_shared/schemas.ts';
 import { MODEL_VERSIONS } from '../_shared/models.ts';
 
-// DINOv2 ViT-S/14 on Replicate — outputs 384-dim embedding
-const DINOV2_VERSION =
-  '5cb2884af21c30f3e4bda5fe5e4d9e2a6af37e0f90a7b7f3d4b8e6a1c2e5d9f3';
+// andreasjansson/clip-features on Replicate — 149M+ runs, ViT-L/14 768-dim
+const CLIP_VERSION =
+  '75b33f253f7714a281ad3e9b28f63e3232d583716ef6718f2e46641077ea040a';
 
 const CONCURRENCY = 4;
 
@@ -96,14 +97,23 @@ async function embedCrop(
 
   let embedding: number[];
   try {
-    const output = await replicateRun(DINOV2_VERSION, {
-      image: signed.signedUrl,
-    }) as { embedding: number[] } | null;
+    // andreasjansson/clip-features takes an "inputs" field with newline-separated
+    // text/image-URLs. For a single image, pass the URL directly.
+    const output = await replicateRun(CLIP_VERSION, {
+      inputs: signed.signedUrl,
+    });
 
-    if (!output?.embedding || output.embedding.length !== 384) {
-      throw new Error('DINOv2 returned unexpected output');
+    // Output is an array of { input, embedding } objects
+    const results = output as Array<{ input: string; embedding: number[] }> | null;
+    if (!results || results.length === 0 || !results[0]?.embedding) {
+      throw new Error('CLIP returned unexpected output');
     }
-    embedding = output.embedding;
+
+    embedding = results[0].embedding;
+
+    if (embedding.length !== 768) {
+      throw new Error(`CLIP returned ${embedding.length}-dim embedding, expected 768`);
+    }
   } catch (err) {
     if (attempt < 3) {
       await sleep(500 * 2 ** (attempt - 1));

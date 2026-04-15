@@ -46,11 +46,13 @@ function HomeSkeleton() {
 function SelfAvatar({
   self,
   thumbnailUrl,
+  facePosition,
   onClick,
   onEdit,
 }: {
   self: Person | undefined;
   thumbnailUrl: string | null;
+  facePosition: string;
   onClick: () => void;
   onEdit: () => void;
 }) {
@@ -78,7 +80,7 @@ function SelfAvatar({
             src={thumbnailUrl}
             alt={self?.display_name ?? 'You'}
             className="w-full h-full object-cover"
-            style={{ objectPosition: 'center 25%' }}
+            style={{ objectPosition: facePosition }}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -146,29 +148,73 @@ const Home = () => {
   const self   = persons.find(p => p.is_self);
   const family = persons.filter(p => !p.is_self);
 
-  // Fetch the self person's front-angle thumbnail (only when self exists)
-  const { data: selfThumbnailUrl = null } = useQuery<string | null>({
+  // Fetch the self person's front-angle thumbnail + face position (only when self exists)
+  const { data: selfThumbnailData = null } = useQuery<{
+    url: string;
+    facePosition: string; // CSS object-position value
+  } | null>({
     queryKey: ['self-thumbnail', self?.id],
     enabled: !!self?.id,
     staleTime: 300_000, // 5 min — signed URL is good for 15 min
     queryFn: async () => {
       const { data: images } = await supabase
         .from('face_images')
-        .select('storage_path')
+        .select('id, storage_path')
         .eq('person_id', self!.id)
         .eq('angle', 'front')
         .order('created_at', { ascending: false })
         .limit(1);
 
-      const path = images?.[0]?.storage_path;
-      if (!path) return null;
+      const imgRow = images?.[0];
+      if (!imgRow?.storage_path) return null;
 
+      // Fetch signed URL
       const { data } = await supabase.storage
         .from('face-images-raw')
-        .createSignedUrl(path, 900); // 15 min
-      return data?.signedUrl ?? null;
+        .createSignedUrl(imgRow.storage_path, 900); // 15 min
+      if (!data?.signedUrl) return null;
+
+      // Fetch face landmarks to compute face-centred position
+      let facePosition = 'center 30%'; // sensible default for face photos
+      try {
+        const { data: landmarkRow } = await supabase
+          .from('face_landmarks')
+          .select('landmarks_json')
+          .eq('face_image_id', imgRow.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (landmarkRow?.landmarks_json) {
+          const json = landmarkRow.landmarks_json as {
+            landmarks?: Array<{ x: number; y: number }>;
+            bbox?: { x: number; y: number; w: number; h: number };
+          };
+
+          if (json.bbox) {
+            // Use bbox centre for positioning
+            const cx = (json.bbox.x + json.bbox.w / 2) * 100;
+            const cy = (json.bbox.y + json.bbox.h / 2) * 100;
+            facePosition = `${cx.toFixed(0)}% ${cy.toFixed(0)}%`;
+          } else if (json.landmarks?.length) {
+            // Compute face centre from all landmarks
+            const xs = json.landmarks.map(l => l.x);
+            const ys = json.landmarks.map(l => l.y);
+            const cx = ((Math.min(...xs) + Math.max(...xs)) / 2) * 100;
+            const cy = ((Math.min(...ys) + Math.max(...ys)) / 2) * 100;
+            facePosition = `${cx.toFixed(0)}% ${cy.toFixed(0)}%`;
+          }
+        }
+      } catch {
+        // Landmark fetch failed — use default position
+      }
+
+      return { url: data.signedUrl, facePosition };
     },
   });
+
+  const selfThumbnailUrl = selfThumbnailData?.url ?? null;
+  const selfFacePosition = selfThumbnailData?.facePosition ?? 'center 30%';
 
   const [analyzing, setAnalyzing]       = useState(false);
   const [analyzeError, setAnalyzeError] = useState('');
@@ -316,6 +362,7 @@ const Home = () => {
       <SelfAvatar
         self={self}
         thumbnailUrl={selfThumbnailUrl}
+        facePosition={selfFacePosition}
         onClick={() => navigate('/capture')}
         onEdit={() => self && openEditSheet(self, selfThumbnailUrl)}
       />
