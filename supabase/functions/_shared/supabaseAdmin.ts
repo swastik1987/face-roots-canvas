@@ -3,11 +3,13 @@
  * Use this for privileged DB operations (e.g. writing embeddings).
  * Never expose the service role key to the client.
  */
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
-let _admin: ReturnType<typeof createClient> | null = null;
+// deno-lint-ignore no-explicit-any
+let _admin: SupabaseClient<any, 'public', any> | null = null;
 
-export function getAdminClient() {
+// deno-lint-ignore no-explicit-any
+export function getAdminClient(): SupabaseClient<any, 'public', any> {
   if (_admin) return _admin;
   _admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
