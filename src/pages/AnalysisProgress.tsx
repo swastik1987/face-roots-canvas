@@ -40,22 +40,34 @@ const AnalysisProgress = () => {
   const [status, setStatus] = useState<Status>('pending');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!id) return;
 
+    const fetchStatus = () =>
+      supabase
+        .from('analyses')
+        .select('status, error_message')
+        .eq('id', id)
+        .single()
+        .then(({ data }) => {
+          if (data) {
+            setStatus(data.status as Status);
+            if (data.error_message) setErrorMessage(data.error_message);
+            // Stop polling once we reach a terminal state
+            if (data.status === 'done' || data.status === 'failed') {
+              if (pollRef.current) clearInterval(pollRef.current);
+            }
+          }
+        });
+
     // Initial fetch
-    supabase
-      .from('analyses')
-      .select('status, error_message')
-      .eq('id', id)
-      .single()
-      .then(({ data }) => {
-        if (data) {
-          setStatus(data.status as Status);
-          if (data.error_message) setErrorMessage(data.error_message);
-        }
-      });
+    fetchStatus();
+
+    // Poll every 4s as a fallback in case Realtime misses an update
+    const poll = setInterval(fetchStatus, 4000);
+    pollRef.current = poll;
 
     // Realtime subscription
     const channel = supabase
@@ -77,7 +89,10 @@ const AnalysisProgress = () => {
       .subscribe();
 
     channelRef.current = channel;
-    return () => { channel.unsubscribe(); };
+    return () => {
+      clearInterval(poll);
+      channel.unsubscribe();
+    };
   }, [id]);
 
   // Fire analytics + navigate when done

@@ -30,6 +30,13 @@ export async function cropAndUploadFeatures(
   landmarkResult: FaceLandmarkerResult,
   angle: 'front' | 'left' | 'right' | 'unknown' = 'front',
 ): Promise<Array<{ feature_type: string; storage_path: string }>> {
+  // Get current user ID — needed for storage path (RLS requires uid as first segment)
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    console.warn('[uploadCrops] No authenticated user — cannot upload crops');
+    return [];
+  }
+
   // Determine which features to crop based on angle
   const features: FeatureType[] = [...FRONT_FEATURES];
   if (angle === 'left') features.push('ear_left');
@@ -51,8 +58,10 @@ export async function cropAndUploadFeatures(
   const uploaded: Array<{ feature_type: string; storage_path: string }> = [];
 
   // Upload each crop in parallel (they're small PNGs)
+  // Path: {userId}/{personId}/{faceImageId}/{featureType}.png
+  // The RLS policy requires auth.uid() as the first path segment.
   const uploadPromises = crops.map(async (crop) => {
-    const cropPath = `${personId}/${faceImageId}/${crop.featureType}.png`;
+    const cropPath = `${user.id}/${personId}/${faceImageId}/${crop.featureType}.png`;
 
     try {
       const { error } = await supabase.storage

@@ -291,8 +291,9 @@ async function embedAllPersons(
       }
 
       // ── Step 2: list existing feature crops from storage ───────────────────
-      // Crops are uploaded client-side to: feature-crops/{person_id}/{face_image_id}/
-      const cropPrefix = `${person.id}/${image.id}`;
+      // Crops are uploaded client-side to: feature-crops/{userId}/{person_id}/{face_image_id}/
+      // The userId prefix is required by the storage RLS policy.
+      const cropPrefix = `${userId}/${person.id}/${image.id}`;
       let crops: Array<{ feature_type: string; storage_path: string }> = [];
 
       try {
