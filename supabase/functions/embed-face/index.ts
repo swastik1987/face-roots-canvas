@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
       .single();
 
     if (faceErr || !faceImage) return jsonResponse({ error: 'Face image not found' }, 404);
-    if (faceImage.persons.owner_user_id !== userId) return jsonResponse({ error: 'Forbidden' }, 403);
+    if ((faceImage.persons as any).owner_user_id !== userId) return jsonResponse({ error: 'Forbidden' }, 403);
 
     // Idempotency check
     const { data: existing } = await db

@@ -49,13 +49,14 @@ Deno.serve(async (req) => {
     let tableRowsDeleted = 0;
     for (const table of tablesToCount) {
       // Join through persons for tables that don't have user_id directly
-      const { count } = await db
+      const result = await db
         .from(table)
         .select('*', { count: 'exact', head: true })
         .eq(
           table === 'analyses' ? 'user_id' : 'person_id',
           table === 'analyses' ? userId : 'irrelevant', // will be handled by cascade
-        ).catch(() => ({ count: 0 }));
+        );
+      const count = result.error ? 0 : result.count;
       tableRowsDeleted += count ?? 0;
     }
 
