@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { captureEvent } from '@/lib/analytics';
+import { ensureAllCropsUploaded } from '@/lib/face/uploadCrops';
 import PhotoEditSheet from '@/components/PhotoEditSheet';
 import FaceCropDialog from '@/components/FaceCropDialog';
 import type { Person } from '@/lib/supabase';
@@ -218,6 +219,7 @@ const Home = () => {
 
   const [analyzing, setAnalyzing]       = useState(false);
   const [analyzeError, setAnalyzeError] = useState('');
+  const [analyzeStatus, setAnalyzeStatus] = useState('');
 
   // Photo edit sheet state
   const [editSheetOpen, setEditSheetOpen]   = useState(false);
@@ -345,8 +347,17 @@ const Home = () => {
     if (!self || !user) return;
     setAnalyzing(true);
     setAnalyzeError('');
+    setAnalyzeStatus('Preparing feature crops…');
     captureEvent('analysis_started', { self_person_id: self.id });
     try {
+      // Ensure all face images have feature crops in storage.
+      // This backfills any images that were captured before the crop
+      // upload fix, using stored landmarks + client-side Canvas API.
+      await ensureAllCropsUploaded((done, total) => {
+        setAnalyzeStatus(`Preparing crops… ${done}/${total}`);
+      });
+
+      setAnalyzeStatus('Starting analysis…');
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/run-analysis`,
@@ -365,6 +376,7 @@ const Home = () => {
     } catch (err) {
       setAnalyzeError((err as Error).message);
       setAnalyzing(false);
+      setAnalyzeStatus('');
     }
   };
 
@@ -499,6 +511,10 @@ const Home = () => {
           {analyzing && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
           {canAnalyze ? 'Discover your Family DNA' : 'Add yourself + 1 family member to start'}
         </motion.button>
+
+        {analyzing && analyzeStatus && (
+          <p className="text-xs text-cyan/70 animate-pulse">{analyzeStatus}</p>
+        )}
 
         {analyzeError && (
           <div className="flex flex-col items-center gap-1.5 max-w-xs" role="alert">

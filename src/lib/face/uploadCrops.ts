@@ -121,3 +121,150 @@ export function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement>
     img.src = dataUrl;
   });
 }
+
+/**
+ * Pre-analysis backfill: ensure every face image owned by the current user
+ * has feature crops uploaded. Uses stored landmarks from the DB + Canvas API
+ * to generate crops client-side for any images that are missing them.
+ *
+ * Call this BEFORE starting run-analysis so the server finds crops in storage.
+ *
+ * @param onProgress  Optional callback for UI feedback (imagesProcessed, totalImages)
+ * @returns Number of images that had crops generated
+ */
+export async function ensureAllCropsUploaded(
+  onProgress?: (done: number, total: number) => void,
+): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    console.warn('[backfill] No authenticated user');
+    return 0;
+  }
+
+  // Fetch all this user's persons
+  const { data: persons } = await supabase
+    .from('persons')
+    .select('id')
+    .eq('owner_user_id', user.id);
+
+  if (!persons?.length) return 0;
+
+  // Fetch all face images with their landmarks
+  const personIds = persons.map(p => p.id);
+  const { data: images } = await supabase
+    .from('face_images')
+    .select('id, person_id, storage_path, angle')
+    .in('person_id', personIds);
+
+  if (!images?.length) return 0;
+
+  // For each image, check if crops already exist
+  let processed = 0;
+  let total = images.length;
+
+  for (const img of images) {
+    onProgress?.(processed, total);
+
+    // Check if crops exist in storage
+    const cropPrefix = `${user.id}/${img.person_id}/${img.id}`;
+    const { data: existing } = await supabase.storage
+      .from('feature-crops')
+      .list(cropPrefix);
+
+    const pngCount = (existing ?? []).filter(f => f.name.endsWith('.png')).length;
+    if (pngCount >= 8) {
+      // Already has enough crops — skip
+      processed++;
+      continue;
+    }
+
+    // Fetch landmarks from DB
+    const { data: lmRow } = await supabase
+      .from('face_landmarks')
+      .select('landmarks_json')
+      .eq('face_image_id', img.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!lmRow?.landmarks_json) {
+      console.warn(`[backfill] No landmarks for image ${img.id} — skipping`);
+      processed++;
+      continue;
+    }
+
+    const stored = lmRow.landmarks_json as {
+      landmarks?: Array<{ x: number; y: number; z?: number; visibility?: number }>;
+    };
+
+    if (!stored.landmarks?.length) {
+      console.warn(`[backfill] Empty landmarks for image ${img.id}`);
+      processed++;
+      continue;
+    }
+
+    // Download the face image from storage
+    const { data: signedData } = await supabase.storage
+      .from('face-images-raw')
+      .createSignedUrl(img.storage_path, 300);
+
+    if (!signedData?.signedUrl) {
+      console.warn(`[backfill] No signed URL for image ${img.id}`);
+      processed++;
+      continue;
+    }
+
+    let imgEl: HTMLImageElement;
+    try {
+      imgEl = await loadImageFromSignedUrl(signedData.signedUrl);
+    } catch {
+      console.warn(`[backfill] Failed to load image ${img.id}`);
+      processed++;
+      continue;
+    }
+
+    // Reconstruct a FaceLandmarkerResult from stored landmarks
+    const mockResult: FaceLandmarkerResult = {
+      faceLandmarks: [stored.landmarks.map(lm => ({
+        x: lm.x,
+        y: lm.y,
+        z: lm.z ?? 0,
+        visibility: lm.visibility ?? 0,
+      }))],
+      faceBlendshapes: [],
+      facialTransformationMatrixes: [],
+    };
+
+    const angle = (img.angle as 'front' | 'left' | 'right') || 'front';
+
+    try {
+      const uploaded = await cropAndUploadFeatures(
+        img.person_id,
+        img.id,
+        imgEl,
+        mockResult,
+        angle,
+      );
+      console.log(`[backfill] Image ${img.id}: uploaded ${uploaded.length} crops`);
+    } catch (err) {
+      console.warn(`[backfill] Crop failed for image ${img.id}:`, err);
+    }
+
+    processed++;
+  }
+
+  onProgress?.(processed, total);
+  console.log(`[backfill] Done: processed ${processed}/${total} images`);
+  return processed;
+}
+
+/** Load an image from a signed URL (cross-origin safe). */
+function loadImageFromSignedUrl(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // needed for Canvas to read pixels
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image from URL'));
+    img.src = url;
+  });
+}
