@@ -3,7 +3,7 @@
  * or edit/crop an existing photo thumbnail.
  */
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sheet,
@@ -12,7 +12,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
-import { Camera, Upload, CropIcon } from 'lucide-react';
+import { Camera, Upload, CropIcon, Trash2 } from 'lucide-react';
 import type { Person } from '@/lib/supabase';
 
 interface PhotoEditSheetProps {
@@ -25,6 +25,8 @@ interface PhotoEditSheetProps {
   onEditCrop: () => void;
   /** Called when user picks a new file to re-upload (family members only). */
   onReupload?: (file: File) => void;
+  /** Called when user confirms they want to delete this member. */
+  onDelete?: () => void;
 }
 
 export default function PhotoEditSheet({
@@ -34,10 +36,18 @@ export default function PhotoEditSheet({
   photoUrl,
   onEditCrop,
   onReupload,
+  onDelete,
 }: PhotoEditSheetProps) {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isSelf = person.is_self;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Reset confirm state when sheet closes
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen) setConfirmDelete(false);
+    onOpenChange(isOpen);
+  };
 
   const handleRecapture = () => {
     onOpenChange(false);
@@ -58,7 +68,7 @@ export default function PhotoEditSheet({
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-8">
         <SheetHeader className="text-left">
           <SheetTitle className="text-base">{person.display_name}</SheetTitle>
@@ -102,7 +112,7 @@ export default function PhotoEditSheet({
           {photoUrl && (
             <button
               onClick={() => {
-                onOpenChange(false);
+                handleOpenChange(false);
                 // Small delay so sheet closes before dialog opens
                 setTimeout(onEditCrop, 200);
               }}
@@ -114,6 +124,48 @@ export default function PhotoEditSheet({
                 <p className="text-xs text-muted-foreground">Adjust which part of the face is used</p>
               </div>
             </button>
+          )}
+
+          {/* Delete member */}
+          {onDelete && (
+            <>
+              <div className="border-t border-white/10 my-1" />
+              {!confirmDelete ? (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-red-500/10 transition-colors text-left"
+                >
+                  <Trash2 size={18} className="text-red-400 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-red-400">Delete member</p>
+                    <p className="text-xs text-muted-foreground">Remove {person.display_name} and all their photos</p>
+                  </div>
+                </button>
+              ) : (
+                <div className="flex flex-col gap-2 px-4 py-3 rounded-xl bg-red-500/10">
+                  <p className="text-sm text-red-400 font-medium">
+                    Delete {person.display_name}? This can't be undone.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        onDelete();
+                        handleOpenChange(false);
+                      }}
+                      className="flex-1 px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors"
+                    >
+                      Yes, delete
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="flex-1 px-4 py-2 rounded-lg bg-white/10 text-sm font-medium hover:bg-white/15 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 

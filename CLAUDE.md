@@ -45,8 +45,8 @@
 | Camera | `react-webcam` + custom overlay | Guided frame |
 | Auth / DB / Storage | Supabase (self-hosted free tier to start) | Magic link + Google OAuth |
 | Vector DB | Supabase pgvector | HNSW indexes |
-| Face embeddings (holistic) | InsightFace `buffalo_l` (ArcFace, 512-dim) | Via Replicate |
-| Feature embeddings (per-crop) | DINOv2 ViT-S/14 (384-dim) | Via Hugging Face Inference API or Replicate |
+| Face embeddings (holistic) | InsightFace `buffalo_l` (ArcFace, 512-dim) | Via Replicate (not used in matching pipeline) |
+| Feature embeddings (per-crop) | CLIP ViT-L/14 (768-dim) | Via Replicate (`andreasjansson/clip-features`) |
 | LLM narration | Google Gemini 2.5 Flash (vision) | Cheap, fast, zero-retention flag on |
 | Share card rendering | Satori + resvg-js (in Edge Function) | Server-generated PNG |
 | Analytics | PostHog | Funnels, session replay |
@@ -76,8 +76,8 @@
 │  ├── Row-Level Security                                  │
 │  └── Edge Functions (Deno):                              │
 │      ├── validate-face                                   │
-│      ├── embed-face (InsightFace holistic)               │
-│      ├── embed-features (DINOv2 per-crop)                │
+│      ├── embed-face (InsightFace holistic, not called)    │
+│      ├── embed-features (CLIP per-crop, 768-dim)         │
 │      ├── run-analysis (orchestrator)                     │
 │      ├── match-features (pgvector cosine)                │
 │      ├── narrate-matches (Gemini vision)                 │
@@ -87,7 +87,7 @@
                 │
 ┌───────────────▼──────────────────────────────────────────┐
 │  External APIs (all zero-retention where supported)      │
-│  ├── Replicate — InsightFace, DINOv2                     │
+│  ├── Replicate — CLIP (andreasjansson/clip-features)     │
 │  ├── Google AI Studio — Gemini 2.5 Flash Vision          │
 │  └── (optional) Cloudflare R2 — cold storage             │
 └──────────────────────────────────────────────────────────┘
@@ -161,6 +161,7 @@ create table face_landmarks (
 );
 
 -- Holistic face embedding (one per face_image, from InsightFace)
+-- NOTE: Not currently used in the matching pipeline. Only feature_embeddings matter.
 create table face_embeddings (
   id uuid primary key default gen_random_uuid(),
   person_id uuid not null references persons(id) on delete cascade,
@@ -173,7 +174,7 @@ create table face_embeddings (
 create index on face_embeddings using hnsw (embedding vector_cosine_ops);
 create index on face_embeddings (person_id);
 
--- Per-feature crops → DINOv2 embeddings (the matchable data)
+-- Per-feature crops → CLIP embeddings (the matchable data)
 create table feature_embeddings (
   id uuid primary key default gen_random_uuid(),
   person_id uuid not null references persons(id) on delete cascade,
@@ -183,9 +184,9 @@ create table feature_embeddings (
   -- |'eyebrows_left'|'eyebrows_right'|'ear_left'|'ear_right'
   -- |'hairline'|'face_shape'
   crop_storage_path text,
-  embedding vector(384) not null,   -- DINOv2 ViT-S/14
+  embedding vector(768) not null,   -- CLIP ViT-L/14
   quality_score float,
-  model_version text not null,      -- e.g. 'dinov2-vits14@2024-01'
+  model_version text not null,      -- e.g. 'clip-vit-large-patch14@2024-01'
   created_at timestamptz default now()
 );
 create index on feature_embeddings using hnsw (embedding vector_cosine_ops);
@@ -280,15 +281,16 @@ All Deno, located in `supabase/functions/<name>/index.ts`. Shared code in `supab
 **Output:** `{ valid: boolean, reason?: string, face_confidence: number, nsfw_score: number }`
 **Logic:** Download image → run server-side face detection (Replicate `retinaface` or similar, as a trust check on client claim) → run NSFW classifier → write scores to `face_images` → return verdict. Reject if `face_confidence < 0.85`, `nsfw_score > 0.3`, or no face found.
 
-### 5.2 `embed-face`
+### 5.2 `embed-face` (currently unused)
 **Input:** `{ face_image_id }`
 **Output:** `{ embedding_id }`
 **Logic:** Fetch image → call Replicate InsightFace (`buffalo_l`) → store 512-dim vector with `model_version`. Idempotent: returns existing row if one exists for this image.
+**Note:** This function exists but is no longer called by `run-analysis`. The matching pipeline only uses `feature_embeddings`, not `face_embeddings`. Skipping this removes a failure point and speeds up the pipeline.
 
 ### 5.3 `embed-features`
 **Input:** `{ face_image_id, crops: [{feature_type, storage_path}, ...] }`
 **Output:** `{ count }`
-**Logic:** For each crop, call DINOv2 endpoint, store 384-dim vector in `feature_embeddings`. Fans out with `Promise.all` but caps concurrency at 4. Retries with exponential backoff (max 3).
+**Logic:** For each crop, call CLIP (`andreasjansson/clip-features` on Replicate, ViT-L/14), store 768-dim vector in `feature_embeddings`. Fans out with `Promise.all` but caps concurrency at 4. Retries with exponential backoff (max 3). Inter-function calls use a 120s AbortController timeout to prevent hangs.
 
 ### 5.4 `run-analysis` (orchestrator)
 **Input:** `{ self_person_id }`
@@ -392,7 +394,7 @@ Fallback path: if camera fails or user retries 3×, switch to "upload 3 photos" 
 4. If >1 face → show "tap the face you want" UI
 5. Auto-crop to face bbox + 20% padding
 6. Confirm screen: crop preview, name input, relationship dropdown
-7. Upload → `validate-face` Edge Function → `embed-face` + `embed-features`
+7. Upload → `validate-face` Edge Function → `embed-features` (embed-face is skipped)
 
 ---
 
@@ -468,8 +470,8 @@ Tasks:
 Tasks:
 - [ ] Scaffold `supabase/functions/_shared/` with: supabase client, sentry wrapper, replicate client, rate limiter, zod schemas
 - [ ] `validate-face` Edge Function
-- [ ] `embed-face` Edge Function (Replicate InsightFace)
-- [ ] `embed-features` Edge Function (Replicate DINOv2)
+- [x] `embed-face` Edge Function (Replicate InsightFace) — exists but no longer called in pipeline
+- [x] `embed-features` Edge Function (Replicate CLIP ViT-L/14, 768-dim)
 - [ ] `match-features` Edge Function with the SQL from §5.5
 - [ ] `run-analysis` orchestrator with Realtime status updates
 - [ ] `delete-my-data` Edge Function (replaces Phase 1 stub)

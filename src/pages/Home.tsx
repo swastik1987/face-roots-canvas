@@ -291,6 +291,54 @@ const Home = () => {
     navigate(`/family/add?tag=${editPerson.relationship_tag}`);
   }, [editPerson, navigate]);
 
+  // ── Handle delete member ─────────────────────────────────────────────────
+
+  const handleDeleteMember = useCallback(async () => {
+    if (!editPerson || !user) return;
+
+    try {
+      // 1. Fetch all storage paths for this person's images
+      const { data: images } = await supabase
+        .from('face_images')
+        .select('storage_path')
+        .eq('person_id', editPerson.id);
+
+      // 2. Delete storage files (best-effort — DB cascade is the source of truth)
+      if (images?.length) {
+        const paths = images.map(i => i.storage_path).filter(Boolean);
+        if (paths.length) {
+          await supabase.storage.from('face-images-raw').remove(paths);
+        }
+      }
+
+      // 3. Also remove any feature crops from storage
+      const cropPrefix = `${user.id}/${editPerson.id}/`;
+      const { data: crops } = await supabase.storage
+        .from('face-images-raw')
+        .list(cropPrefix);
+      if (crops?.length) {
+        const cropPaths = crops.map(f => `${cropPrefix}${f.name}`);
+        await supabase.storage.from('face-images-raw').remove(cropPaths);
+      }
+
+      // 4. Delete the person row — cascades to face_images, embeddings, etc.
+      const { error } = await supabase
+        .from('persons')
+        .delete()
+        .eq('id', editPerson.id);
+      if (error) throw error;
+
+      // 5. Refresh UI
+      await queryClient.invalidateQueries({ queryKey: ['persons'] });
+      await queryClient.invalidateQueries({ queryKey: ['family-thumbnail'] });
+      await queryClient.invalidateQueries({ queryKey: ['self-thumbnail'] });
+
+      setEditPerson(null);
+    } catch (err) {
+      console.error('Delete member failed', err);
+    }
+  }, [editPerson, user, queryClient]);
+
   // ── Start analysis ────────────────────────────────────────────────────────
 
   const startAnalysis = async () => {
@@ -480,6 +528,7 @@ const Home = () => {
           photoUrl={editPhotoUrl}
           onEditCrop={handleEditCrop}
           onReupload={handleFamilyReupload}
+          onDelete={handleDeleteMember}
         />
       )}
 
