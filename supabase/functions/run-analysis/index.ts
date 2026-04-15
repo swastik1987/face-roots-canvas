@@ -60,13 +60,14 @@ Deno.serve(async (req) => {
       .eq('id', userId)
       .single();
 
-    const isPro = profile?.plan === 'pro';
-    await checkRateLimit({
-      userId,
-      action: 'run_analysis',
-      windowSecs: 86400,
-      maxCalls: isPro ? 30 : 10,
-    });
+    // Rate limiting disabled during development — will be re-enabled later
+    // const isPro = profile?.plan === 'pro';
+    // await checkRateLimit({
+    //   userId,
+    //   action: 'run_analysis',
+    //   windowSecs: 86400,
+    //   maxCalls: isPro ? 30 : 10,
+    // });
 
     // Verify self_person_id belongs to this user and is_self
     const { data: selfPerson, error: personErr } = await db

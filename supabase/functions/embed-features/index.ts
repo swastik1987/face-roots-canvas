@@ -47,6 +47,7 @@ Deno.serve(async (req) => {
 
     // Process crops in batches of CONCURRENCY
     let successCount = 0;
+    const errors: string[] = [];
 
     for (let i = 0; i < crops.length; i += CONCURRENCY) {
       const batch = crops.slice(i, i + CONCURRENCY);
@@ -58,12 +59,14 @@ Deno.serve(async (req) => {
       // Log failures but don't abort the whole batch
       for (const r of results) {
         if (r.status === 'rejected') {
-          console.error('[embed-features] crop failed:', r.reason);
+          const errMsg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          console.error('[embed-features] crop failed:', errMsg);
+          errors.push(errMsg);
         }
       }
     }
 
-    return jsonResponse({ count: successCount });
+    return jsonResponse({ count: successCount, errors: errors.length > 0 ? errors : undefined });
   } catch (err) {
     await captureException(err, { functionName: 'embed-features', userId });
     const status = (err as Error & { status?: number }).status ?? 500;
