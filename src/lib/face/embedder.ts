@@ -61,8 +61,8 @@ export async function embedImage(blob: Blob): Promise<number[]> {
   // Convert blob to a data URL that Transformers.js can read
   const dataUrl = await blobToDataUrl(blob);
 
-  // Run the CLIP vision encoder — CLIP ViT-B/32 returns pooled [1, 512] by default
-  const output = await embedder(dataUrl, { pool: true });
+  // Run the CLIP vision encoder — CLIP ViT-B/32 returns pooled [1, 512] natively
+  const output = await embedder(dataUrl);
 
   // Extract the raw embedding and L2-normalize it
   const raw = Array.from(output.data as Float32Array);
