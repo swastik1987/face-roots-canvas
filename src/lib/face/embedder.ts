@@ -61,11 +61,13 @@ export async function embedImage(blob: Blob): Promise<number[]> {
   // Convert blob to a data URL that Transformers.js can read
   const dataUrl = await blobToDataUrl(blob);
 
-  // Run the CLIP vision encoder
-  const output = await embedder(dataUrl, { pool: 'mean', normalize: true } as Record<string, unknown>);
+  // Run the CLIP vision encoder — CLIP ViT-B/32 returns pooled [1, 512] by default
+  const output = await embedder(dataUrl, { pool: true });
 
-  // Extract the embedding array
-  const embedding = Array.from(output.data as Float32Array);
+  // Extract the raw embedding and L2-normalize it
+  const raw = Array.from(output.data as Float32Array);
+  const norm = Math.sqrt(raw.reduce((sum, v) => sum + v * v, 0)) || 1;
+  const embedding = raw.map(v => v / norm);
 
   if (embedding.length !== EMBEDDING_DIM) {
     throw new Error(
