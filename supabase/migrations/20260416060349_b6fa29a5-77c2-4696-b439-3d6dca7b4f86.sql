@@ -1,0 +1,1 @@
+ALTER TABLE public.feature_matches ADD CONSTRAINT feature_matches_analysis_id_feature_type_key UNIQUE (analysis_id, feature_type);
