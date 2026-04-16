@@ -62,19 +62,35 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'No feature embeddings for self' }, 400);
     }
 
+    console.log(`[match-features] Found ${selfFeatureRows.length} self feature rows`);
+    // Log the raw shape of the first embedding to debug format issues
+    const sampleEmb = selfFeatureRows[0].embedding;
+    console.log(`[match-features] Embedding type: ${typeof sampleEmb}, isArray: ${Array.isArray(sampleEmb)}, sample: ${String(sampleEmb).substring(0, 80)}`);
+
     // Group by feature_type → compute mean embedding per feature
     const featureMap = new Map<string, number[][]>();
     for (const row of selfFeatureRows) {
-      const parsed = parseVector(row.embedding as string);
+      const embValue = row.embedding;
+      // Handle both string and array formats from pgvector
+      const parsed = typeof embValue === 'string'
+        ? parseVector(embValue)
+        : Array.isArray(embValue)
+          ? (embValue as number[])
+          : parseVector(String(embValue));
       if (!featureMap.has(row.feature_type)) featureMap.set(row.feature_type, []);
       featureMap.get(row.feature_type)!.push(parsed);
     }
+
+    console.log(`[match-features] Feature types: ${[...featureMap.keys()].join(', ')}`);
+    console.log(`[match-features] Family IDs: ${familyIds.join(', ')}`);
 
     let matchesWritten = 0;
 
     for (const [featureType, embeddings] of featureMap) {
       const meanEmb = meanVector(embeddings);
       const meanStr = `[${meanEmb.join(',')}]`;
+
+      console.log(`[match-features] Querying ${featureType}: dim=${meanEmb.length}, familyIds=${familyIds.length}`);
 
       // Use pgvector RPC to find top-N family members by cosine similarity
       const { data: matches, error: matchErr } = await db.rpc('match_feature_embeddings', {
@@ -88,6 +104,8 @@ Deno.serve(async (req) => {
         console.error(`[match-features] RPC error for ${featureType}:`, matchErr);
         continue;
       }
+
+      console.log(`[match-features] ${featureType}: ${matches?.length ?? 0} matches`, matches);
 
       if (!matches || matches.length === 0) continue;
 
