@@ -354,8 +354,8 @@ const Home = () => {
       // This backfills any images missing crops/embeddings by:
       // 1. Generating crops client-side from stored landmarks
       // 2. Uploading to feature-crops bucket
-      // 3. Calling embed-features to generate CLIP embeddings
-      // After this, run-analysis finds existing embeddings and skips crop listing.
+      // 3. Running CLIP ViT-B/32 in-browser via Transformers.js (no API calls)
+      // 4. Inserting embeddings directly into feature_embeddings table
       await ensureAllCropsUploaded((done, total) => {
         setAnalyzeStatus(`Preparing features… ${done}/${total}`);
       });

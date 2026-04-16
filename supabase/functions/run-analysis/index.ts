@@ -154,10 +154,12 @@ async function runPipeline(
 
   try {
     // ── Stage: embedding ──────────────────────────────────────────────────────
-    // Generate face + feature embeddings for all persons. Idempotent — skips
-    // any person/image that already has embeddings.
+    // Embeddings are now generated client-side using Transformers.js (CLIP
+    // ViT-B/32) before the analysis is triggered. The client calls
+    // ensureAllCropsUploaded() which crops features and generates embeddings
+    // in the browser, inserting them directly into feature_embeddings.
+    // We just verify they exist — no server-side embedding needed.
     await setStatus('embedding');
-    await embedAllPersons(userId, userToken, db);
 
     // Verify self has feature embeddings before proceeding — embedAllPersons
     // catches errors per-image to avoid one bad image blocking everything,

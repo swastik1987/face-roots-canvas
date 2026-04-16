@@ -1,10 +1,11 @@
 /**
- * Client-side feature cropping + upload to Supabase Storage.
+ * Client-side feature cropping, embedding, and upload.
  *
  * Called after capturing/uploading a face image, this uses the browser
- * Canvas API (which works everywhere — unlike OffscreenCanvas in Deno)
- * to crop each facial feature region and upload the crops to the
- * `feature-crops` bucket so that run-analysis can find them server-side.
+ * Canvas API to crop each facial feature region, generates CLIP embeddings
+ * client-side via Transformers.js (no API calls), uploads the crops to
+ * the `feature-crops` bucket, and inserts embeddings directly into the
+ * `feature_embeddings` table.
  *
  * Storage path: {userId}/{personId}/{faceImageId}/{featureType}.png
  * The userId prefix is required by the bucket's RLS policy.
@@ -13,6 +14,7 @@
 import { supabase } from '@/lib/supabase';
 import { cropFeatures } from './cropper';
 import { FRONT_FEATURES, SIDE_FEATURES, type FeatureType } from './regions';
+import { embedImage, CLIP_MODEL_VERSION, EMBEDDING_DIM } from './embedder';
 import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 
 /**
@@ -143,12 +145,6 @@ export async function ensureAllCropsUploaded(
     return 0;
   }
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) {
-    console.warn('[backfill] No session');
-    return 0;
-  }
-
   // Fetch all this user's persons
   const { data: persons } = await supabase
     .from('persons')
@@ -275,34 +271,62 @@ export async function ensureAllCropsUploaded(
       }
     }
 
-    // Call embed-features to generate CLIP embeddings from the uploaded crops.
-    // This uses the admin client server-side, so it reads crops regardless of
-    // which storage path scheme the run-analysis function expects.
+    // Generate CLIP embeddings client-side using Transformers.js (no API needed)
+    // and insert directly into feature_embeddings table.
     if (uploadedCrops.length > 0) {
-      try {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const res = await fetch(`${supabaseUrl}/functions/v1/embed-features`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            face_image_id: img.id,
-            crops: uploadedCrops,
-          }),
-        });
+      let embeddedCount = 0;
 
-        if (!res.ok) {
-          const errText = await res.text().catch(() => 'unknown');
-          console.warn(`[backfill] embed-features failed for ${img.id}: ${res.status} ${errText}`);
-        } else {
-          const result = await res.json();
-          console.log(`[backfill] Image ${img.id}: embedded ${result.count} features`);
+      for (const crop of uploadedCrops) {
+        try {
+          // Check if this specific embedding already exists
+          const { data: existingEmb } = await supabase
+            .from('feature_embeddings')
+            .select('id')
+            .eq('face_image_id', img.id)
+            .eq('feature_type', crop.feature_type)
+            .maybeSingle();
+
+          if (existingEmb) {
+            embeddedCount++;
+            continue; // idempotent — skip if already done
+          }
+
+          // Download the crop from storage to get the blob
+          const { data: cropBlob } = await supabase.storage
+            .from('feature-crops')
+            .download(crop.storage_path);
+
+          if (!cropBlob) {
+            console.warn(`[backfill] Could not download crop ${crop.storage_path}`);
+            continue;
+          }
+
+          // Generate CLIP embedding client-side
+          const embedding = await embedImage(cropBlob);
+
+          // Insert directly into feature_embeddings
+          const { error: insertErr } = await supabase
+            .from('feature_embeddings')
+            .insert({
+              person_id: img.person_id,
+              face_image_id: img.id,
+              feature_type: crop.feature_type,
+              crop_storage_path: crop.storage_path,
+              embedding: `[${embedding.join(',')}]`,
+              model_version: CLIP_MODEL_VERSION,
+            });
+
+          if (insertErr) {
+            console.warn(`[backfill] Insert failed for ${crop.feature_type}:`, insertErr.message);
+          } else {
+            embeddedCount++;
+          }
+        } catch (err) {
+          console.warn(`[backfill] Embedding failed for ${crop.feature_type}:`, err);
         }
-      } catch (err) {
-        console.warn(`[backfill] embed-features call failed for ${img.id}:`, err);
       }
+
+      console.log(`[backfill] Image ${img.id}: embedded ${embeddedCount}/${uploadedCrops.length} features`);
     }
 
     processed++;

@@ -20,6 +20,10 @@ export default defineConfig(({ mode }) => ({
       devOptions: { enabled: false },
       workbox: {
         navigateFallbackDenylist: [/^\/~oauth/],
+        // Exclude large ONNX WASM files from service worker precache.
+        // They're loaded on-demand by Transformers.js and cached by the browser.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
+        globIgnores: ['**/*.wasm'],
       },
       manifest: {
         name: "FaceRoots",
