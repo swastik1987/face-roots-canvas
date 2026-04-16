@@ -51,15 +51,36 @@ interface FaceSilhouetteProps {
   pins: HotspotPin[];
   activeFeature: FeatureType | null;
   onFeatureClick: (f: FeatureType) => void;
+  selfFaceUrl?: string | null;
 }
 
-export default function FaceSilhouette({ pins, activeFeature, onFeatureClick }: FaceSilhouetteProps) {
+export default function FaceSilhouette({ pins, activeFeature, onFeatureClick, selfFaceUrl }: FaceSilhouetteProps) {
   return (
     <svg
       viewBox="0 0 200 280"
       className="w-full max-w-[220px] mx-auto select-none"
       aria-label="Face silhouette with feature hotspots"
     >
+      {/* ── Clip path for face photo ───────────────────────────────────── */}
+      <defs>
+        <clipPath id="face-clip">
+          <ellipse cx="100" cy="138" rx="74" ry="98" />
+        </clipPath>
+      </defs>
+
+      {/* ── Self face photo (behind outline) ─────────────────────────────── */}
+      {selfFaceUrl && (
+        <image
+          href={selfFaceUrl}
+          x="26" y="40"
+          width="148" height="196"
+          clipPath="url(#face-clip)"
+          preserveAspectRatio="xMidYMid slice"
+          opacity="0.35"
+          style={{ filter: 'saturate(0.6)' }}
+        />
+      )}
+
       {/* ── Face outline ─────────────────────────────────────────────────── */}
       {/* Outer face shape */}
       <ellipse

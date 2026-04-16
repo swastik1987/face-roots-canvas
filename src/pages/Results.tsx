@@ -120,7 +120,34 @@ async function fetchResultsData(analysisId: string) {
     }
   }
 
-  return { analysis, matches: matches ?? [], personMap, selfPerson, cropMap };
+  // 6. Self face image (front angle preferred) for silhouette background
+  let selfFaceUrl: string | null = null;
+  if (analysis.self_person_id) {
+    const { data: selfImage } = await supabase
+      .from('face_images')
+      .select('storage_path')
+      .eq('person_id', analysis.self_person_id)
+      .eq('angle', 'front')
+      .limit(1)
+      .maybeSingle();
+
+    // Fall back to any angle if no front exists
+    const imgRow = selfImage ?? (await supabase
+      .from('face_images')
+      .select('storage_path')
+      .eq('person_id', analysis.self_person_id)
+      .limit(1)
+      .maybeSingle()).data;
+
+    if (imgRow?.storage_path) {
+      const { data: signedData } = await supabase.storage
+        .from('face-images-raw')
+        .createSignedUrl(imgRow.storage_path, 900);
+      selfFaceUrl = signedData?.signedUrl ?? null;
+    }
+  }
+
+  return { analysis, matches: matches ?? [], personMap, selfPerson, cropMap, selfFaceUrl };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -177,7 +204,7 @@ export default function Results() {
     );
   }
 
-  const { matches, personMap, selfPerson, cropMap } = data;
+  const { matches, personMap, selfPerson, cropMap, selfFaceUrl } = data;
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (!matches.length) {
@@ -254,6 +281,7 @@ export default function Results() {
             pins={pins}
             activeFeature={activeFeature}
             onFeatureClick={(f) => setActiveFeature(prev => prev === f ? null : f)}
+            selfFaceUrl={selfFaceUrl}
           />
         </motion.div>
 
