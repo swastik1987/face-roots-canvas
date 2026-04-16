@@ -62,7 +62,7 @@ export async function embedImage(blob: Blob): Promise<number[]> {
   const dataUrl = await blobToDataUrl(blob);
 
   // Run the CLIP vision encoder
-  const output = await embedder(dataUrl, { pooling: 'mean', normalize: true });
+  const output = await embedder(dataUrl, { pool: 'mean', normalize: true } as Record<string, unknown>);
 
   // Extract the embedding array
   const embedding = Array.from(output.data as Float32Array);
