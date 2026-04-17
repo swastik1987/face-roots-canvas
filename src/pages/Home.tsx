@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { captureEvent } from '@/lib/analytics';
 import { ensureAllCropsUploaded } from '@/lib/face/uploadCrops';
+import { normalizeToPortrait } from '@/lib/face/normalize';
 import PhotoEditSheet from '@/components/PhotoEditSheet';
 import FaceCropDialog from '@/components/FaceCropDialog';
 import type { Person } from '@/lib/supabase';
@@ -267,10 +268,12 @@ const Home = () => {
         .eq('person_id', cropPersonId)
         .eq('angle', 'front');
 
+      const normalizedBlob = await normalizeToPortrait(blob);
+
       const path = `${user.id}/${cropPersonId}/cropped_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
         .from('face-images-raw')
-        .upload(path, blob, { contentType: 'image/jpeg' });
+        .upload(path, normalizedBlob, { contentType: 'image/jpeg' });
       if (se) throw se;
 
       // Insert new face_images row
