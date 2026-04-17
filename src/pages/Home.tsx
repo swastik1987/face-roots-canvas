@@ -302,7 +302,7 @@ const Home = () => {
       // 1. Fetch all storage paths for this person's images
       const { data: images } = await supabase
         .from('face_images')
-        .select('storage_path')
+        .select('id, storage_path')
         .eq('person_id', editPerson.id);
 
       // 2. Delete storage files (best-effort — DB cascade is the source of truth)
@@ -313,29 +313,54 @@ const Home = () => {
         }
       }
 
-      // 3. Also remove any feature crops from storage
-      const cropPrefix = `${user.id}/${editPerson.id}/`;
-      const { data: crops } = await supabase.storage
-        .from('face-images-raw')
-        .list(cropPrefix);
-      if (crops?.length) {
-        const cropPaths = crops.map(f => `${cropPrefix}${f.name}`);
-        await supabase.storage.from('face-images-raw').remove(cropPaths);
+      // 3. Also remove any feature crops from storage (best-effort).
+      // Crops are stored under: {userId}/{personId}/{faceImageId}/{featureType}.png
+      if (images?.length) {
+        const cropPaths: string[] = [];
+        for (const image of images) {
+          const imagePrefix = `${user.id}/${editPerson.id}/${image.id}`;
+          const { data: crops } = await supabase.storage
+            .from('feature-crops')
+            .list(imagePrefix);
+          if (!crops?.length) continue;
+          for (const file of crops) {
+            cropPaths.push(`${imagePrefix}/${file.name}`);
+          }
+        }
+
+        if (cropPaths.length) {
+          await supabase.storage.from('feature-crops').remove(cropPaths);
+        }
       }
 
-      // 4. Delete the person row — cascades to face_images, embeddings, etc.
+      // 4. Remove historical feature_matches that reference this person as winner.
+      // Without this, FK constraints can block deleting the person row.
+      const { error: matchDeleteError } = await supabase
+        .from('feature_matches')
+        .delete()
+        .eq('winner_person_id', editPerson.id);
+      if (matchDeleteError) throw matchDeleteError;
+
+      // 5. Delete the person row — cascades to face_images, landmarks, embeddings, etc.
       const { error } = await supabase
         .from('persons')
         .delete()
         .eq('id', editPerson.id);
       if (error) throw error;
 
-      // 5. Refresh UI
-      await queryClient.invalidateQueries({ queryKey: ['persons'] });
+      // 6. Optimistically update local list so the card disappears immediately.
+      queryClient.setQueryData<Person[]>(
+        ['persons', user.id],
+        (existing = []) => existing.filter((p) => p.id !== editPerson.id),
+      );
+
+      // 7. Refresh related queries
+      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
       await queryClient.invalidateQueries({ queryKey: ['family-thumbnail'] });
       await queryClient.invalidateQueries({ queryKey: ['self-thumbnail'] });
 
       setEditPerson(null);
+      setEditSheetOpen(false);
     } catch (err) {
       console.error('Delete member failed', err);
     }
