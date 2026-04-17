@@ -14,12 +14,14 @@ import {
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFaceStore } from '@/stores/faceStore';
 
 const spring = { type: 'spring' as const, stiffness: 260, damping: 20 };
 
 const Settings = () => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const clearFrames = useFaceStore((s) => s.clearFrames);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -45,8 +47,9 @@ const Settings = () => {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error ?? 'Deletion failed');
       }
+      clearFrames();
       await signOut();
-      navigate('/', { replace: true });
+      navigate('/auth', { replace: true });
     } catch (err) {
       setDeleteError((err as Error).message || 'Something went wrong. Please try again.');
       setDeleting(false);
