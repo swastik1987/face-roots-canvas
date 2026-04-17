@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { User, Shield, Trash2, ChevronRight, Loader2, LogOut } from 'lucide-react';
+import { User, Shield, Trash2, ChevronRight, LogOut } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFaceStore } from '@/stores/faceStore';
@@ -24,12 +26,38 @@ const Settings = () => {
   const clearFrames = useFaceStore((s) => s.clearFrames);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('');
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearTimeouts = () => {
+    timeoutsRef.current.forEach((t) => clearTimeout(t));
+    timeoutsRef.current = [];
+  };
+
+  useEffect(() => () => clearTimeouts(), []);
+
+  const startProgressStepper = () => {
+    setProgress(10);
+    setProgressLabel('Preparing…');
+    timeoutsRef.current.push(
+      setTimeout(() => {
+        setProgress(35);
+        setProgressLabel('Erasing photos & embeddings…');
+      }, 400),
+    );
+    timeoutsRef.current.push(
+      setTimeout(() => {
+        setProgress(70);
+        setProgressLabel('Removing account…');
+      }, 1200),
+    );
+  };
 
   const handleDeleteAccount = async () => {
     if (!user) return;
     setDeleting(true);
-    setDeleteError('');
+    startProgressStepper();
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -47,12 +75,22 @@ const Settings = () => {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error ?? 'Deletion failed');
       }
+      clearTimeouts();
+      setProgress(100);
+      setProgressLabel('Done');
       clearFrames();
+      toast.success('Account deleted', {
+        description: 'All your data has been permanently erased.',
+      });
       await signOut();
       navigate('/auth', { replace: true });
     } catch (err) {
-      setDeleteError((err as Error).message || 'Something went wrong. Please try again.');
+      clearTimeouts();
+      const message = (err as Error).message || 'Something went wrong. Please try again.';
+      toast.error('Failed to delete account', { description: message });
       setDeleting(false);
+      setProgress(0);
+      setProgressLabel('');
     }
   };
 
@@ -115,27 +153,47 @@ const Settings = () => {
         ))}
       </div>
 
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent className="glass-card border-white/10">
+      <AlertDialog
+        open={showDeleteDialog}
+        onOpenChange={(open) => {
+          if (deleting) return;
+          setShowDeleteDialog(open);
+        }}
+      >
+        <AlertDialogContent
+          className="glass-card border-white/10"
+          onEscapeKeyDown={(e) => {
+            if (deleting) e.preventDefault();
+          }}
+        >
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleting ? 'Deleting your account…' : 'Delete your account?'}
+            </AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              This will permanently erase all your photos, embeddings, analyses, and results.
-              This action cannot be undone.
+              {deleting
+                ? 'Please keep this window open while we erase your data.'
+                : 'This will permanently erase all your photos, embeddings, analyses, and results. This action cannot be undone.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {deleteError && <p className="text-xs text-destructive px-1">{deleteError}</p>}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive hover:bg-destructive/90"
-              onClick={handleDeleteAccount}
-              disabled={deleting}
-            >
-              {deleting ? <Loader2 size={14} className="animate-spin mr-1" /> : null}
-              Yes, delete everything
-            </AlertDialogAction>
-          </AlertDialogFooter>
+
+          {deleting ? (
+            <div className="space-y-2 py-2">
+              <Progress value={progress} className="h-2" />
+              <p className="text-xs text-muted-foreground">{progressLabel}</p>
+            </div>
+          ) : (
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive hover:bg-destructive/90"
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+              >
+                Yes, delete everything
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          )}
         </AlertDialogContent>
       </AlertDialog>
     </div>
