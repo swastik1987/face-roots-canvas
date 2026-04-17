@@ -128,6 +128,7 @@ async function fetchResultsData(analysisId: string) {
       .select('storage_path')
       .eq('person_id', analysis.self_person_id)
       .eq('angle', 'front')
+      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
@@ -136,6 +137,7 @@ async function fetchResultsData(analysisId: string) {
       .from('face_images')
       .select('storage_path')
       .eq('person_id', analysis.self_person_id)
+      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()).data;
 
