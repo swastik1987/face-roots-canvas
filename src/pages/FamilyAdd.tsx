@@ -24,6 +24,7 @@ import {
 import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw } from 'lucide-react';
 import { initDetector, setRunningMode, detectImage } from '@/lib/face/detector';
 import { cropAndUploadFeatures } from '@/lib/face/uploadCrops';
+import { normalizeToPortrait } from '@/lib/face/normalize';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
@@ -218,11 +219,14 @@ const FamilyAdd = () => {
         .single();
       if (pe) throw pe;
 
+      // Normalize to portrait ratio before upload to keep stored photos consistent.
+      const normalizedCropBlob = await normalizeToPortrait(cropBlob);
+
       // Upload the cropped face image
       const path = `${user.id}/family/${person.id}_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
         .from('face-images-raw')
-        .upload(path, cropBlob, { contentType: 'image/jpeg' });
+        .upload(path, normalizedCropBlob, { contentType: 'image/jpeg' });
       if (se) throw se;
 
       // face_images row
