@@ -63,7 +63,7 @@ function SelfAvatar({
   return (
     <div className="flex flex-col items-center gap-2">
       <motion.div
-        className={`relative w-24 h-24 rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
+        className={`relative w-24 h-24 aspect-square rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
           captured
             ? 'border-cyan shadow-[0_0_16px_rgba(0,229,255,0.4)]'
             : 'border-dashed border-white/20 bg-white/5'
