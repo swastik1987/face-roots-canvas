@@ -260,6 +260,13 @@ const Home = () => {
     if (!user || !cropPersonId) return;
 
     try {
+      // Capture existing front photos so we can replace them after the new upload succeeds.
+      const { data: previousFrontImages } = await supabase
+        .from('face_images')
+        .select('id, storage_path')
+        .eq('person_id', cropPersonId)
+        .eq('angle', 'front');
+
       const path = `${user.id}/${cropPersonId}/cropped_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
         .from('face-images-raw')
@@ -267,7 +274,7 @@ const Home = () => {
       if (se) throw se;
 
       // Insert new face_images row
-      await supabase
+      const { data: inserted, error: insertError } = await supabase
         .from('face_images')
         .insert({
           person_id:      cropPersonId,
@@ -275,11 +282,51 @@ const Home = () => {
           angle:          'front',
           capture_method: 'upload_cropped',
           face_confidence: 1,
-        });
+        })
+        .select('id')
+        .single();
+      if (insertError) throw insertError;
+
+      // Remove older front images so analysis and UI always use the newest portrait.
+      const oldFrontImages = (previousFrontImages ?? []).filter((img) => img.id !== inserted.id);
+      if (oldFrontImages.length) {
+        const oldIds = oldFrontImages.map((img) => img.id);
+        const oldPaths = oldFrontImages
+          .map((img) => img.storage_path)
+          .filter(Boolean);
+
+        // Best-effort storage cleanup for raw images.
+        if (oldPaths.length) {
+          await supabase.storage.from('face-images-raw').remove(oldPaths);
+        }
+
+        // Best-effort storage cleanup for per-image feature crops.
+        const cropPaths: string[] = [];
+        for (const imageId of oldIds) {
+          const imagePrefix = `${user.id}/${cropPersonId}/${imageId}`;
+          const { data: crops } = await supabase.storage
+            .from('feature-crops')
+            .list(imagePrefix);
+          if (!crops?.length) continue;
+          for (const file of crops) {
+            cropPaths.push(`${imagePrefix}/${file.name}`);
+          }
+        }
+        if (cropPaths.length) {
+          await supabase.storage.from('feature-crops').remove(cropPaths);
+        }
+
+        // DB delete cascades landmarks/embeddings tied to old front images.
+        await supabase
+          .from('face_images')
+          .delete()
+          .in('id', oldIds);
+      }
 
       // Invalidate thumbnail caches so they refresh
       await queryClient.invalidateQueries({ queryKey: ['self-thumbnail'] });
       await queryClient.invalidateQueries({ queryKey: ['family-thumbnail'] });
+      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
     } catch (err) {
       console.error('Crop save failed', err);
     }
