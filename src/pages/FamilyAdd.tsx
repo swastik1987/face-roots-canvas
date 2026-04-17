@@ -70,6 +70,17 @@ function getBbox(
   };
 }
 
+function transformLandmarksToCrop(
+  landmarks: Array<{ x: number; y: number; z?: number; visibility?: number }>,
+  bbox: { x: number; y: number; w: number; h: number },
+) {
+  return landmarks.map((lm) => ({
+    ...lm,
+    x: Math.min(1, Math.max(0, (lm.x - bbox.x) / bbox.w)),
+    y: Math.min(1, Math.max(0, (lm.y - bbox.y) / bbox.h)),
+  }));
+}
+
 /** Draw full image to canvas and extract the face-bbox region as a Blob. */
 async function cropFaceBlob(
   img: HTMLImageElement,
@@ -109,8 +120,6 @@ const FamilyAdd = () => {
   const [previewUrl, setPreviewUrl] = useState('');   // full image object URL
   const [cropUrl, setCropUrl]     = useState('');     // cropped face data URL
   const [cropBlob, setCropBlob]   = useState<Blob | null>(null);
-  const [originalBlob, setOriginalBlob] = useState<Blob | null>(null);
-  const [originalImg, setOriginalImg] = useState<HTMLImageElement | null>(null);
   const [detectionResult, setDetectionResult] = useState<FaceLandmarkerResult | null>(null);
   const [bboxPercent, setBboxPercent] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [name, setName]           = useState('');
@@ -139,7 +148,6 @@ const FamilyAdd = () => {
 
     setPhase('detecting');
     setErrorMsg('');
-    setOriginalBlob(file);
 
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
@@ -154,8 +162,6 @@ const FamilyAdd = () => {
         img.onload = () => resolve();
         img.onerror = () => reject(new Error('Image failed to load'));
       });
-      setOriginalImg(img);
-
       const result = detectImage(img);
       const numFaces = result.faceLandmarks?.length ?? 0;
 
@@ -239,27 +245,41 @@ const FamilyAdd = () => {
 
       // face_landmarks — store bbox + landmark count for Phase 3 re-use
       const lms = detectionResult?.faceLandmarks?.[0];
+      const transformedLandmarks =
+        lms && bboxPercent ? transformLandmarksToCrop(lms, bboxPercent) : [];
       const matrices = detectionResult?.facialTransformationMatrixes;
       const matrixArr = matrices?.[0]?.data ? Array.from(matrices[0].data) : null;
       await supabase.from('face_landmarks').insert({
         face_image_id: imgRow.id,
         landmarks_json: {
-          landmarks: lms ?? [],
+          landmarks: transformedLandmarks,
           matrix: matrixArr,
-          bbox: bboxPercent,
+          bbox: { x: 0, y: 0, w: 1, h: 1 },
         },
       });
 
-      // Crop features client-side and upload to feature-crops bucket.
-      // Uses the ORIGINAL full image (not the face-cropped version) since
-      // landmarks reference the original image coordinates.
-      if (originalImg && detectionResult) {
+      // Crop features client-side and upload to feature-crops bucket using the
+      // SAME stored face crop + transformed landmarks coordinate space.
+      if (cropUrl && transformedLandmarks.length > 0) {
         try {
+          const croppedImg = new Image();
+          croppedImg.src = cropUrl;
+          await new Promise<void>((resolve, reject) => {
+            croppedImg.onload = () => resolve();
+            croppedImg.onerror = () => reject(new Error('Failed to load cropped image'));
+          });
+
+          const transformedResult: FaceLandmarkerResult = {
+            faceLandmarks: [transformedLandmarks],
+            faceBlendshapes: detectionResult?.faceBlendshapes ?? [],
+            facialTransformationMatrixes: detectionResult?.facialTransformationMatrixes ?? [],
+          };
+
           await cropAndUploadFeatures(
             person.id,
             imgRow.id,
-            originalImg,
-            detectionResult,
+            croppedImg,
+            transformedResult,
             'front',
           );
         } catch (cropErr) {
@@ -284,8 +304,6 @@ const FamilyAdd = () => {
     setPreviewUrl('');
     setCropUrl('');
     setCropBlob(null);
-    setOriginalBlob(null);
-    setOriginalImg(null);
     setDetectionResult(null);
     setBboxPercent(null);
     setErrorMsg('');

@@ -229,6 +229,7 @@ const Capture = () => {
 
     fetch(screenshot)
       .then(r => r.blob())
+      .then((blob) => {
       .then(async (blob) => {
         const normalizedBlob = await normalizeToPortrait(blob);
         addFrame({
