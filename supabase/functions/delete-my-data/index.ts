@@ -71,9 +71,57 @@ Deno.serve(async (req) => {
       storageDeleted += await purgeDirectory(db, bucket, userId);
     }
 
-    // 4. Hard-delete the auth user. This frees the email and cascades to every
-    //    public table via FK ON DELETE CASCADE. Throw on failure so the client
-    //    surfaces the error rather than thinking the account is gone.
+    // 4. Explicitly delete all user-scoped rows in public schema BEFORE deleting
+    //    the auth user. We don't rely on FK cascades because some tables may
+    //    not have ON DELETE CASCADE on their reference to auth.users, which
+    //    causes auth.admin.deleteUser to fail with "Database error deleting user".
+
+    // 4a. Child tables that reference persons / analyses / face_images
+    if (personIds.length > 0) {
+      // face_landmarks → face_images → persons
+      const { data: faceImgs } = await db
+        .from('face_images')
+        .select('id')
+        .in('person_id', personIds);
+      const faceImageIds = (faceImgs ?? []).map((r) => r.id);
+      if (faceImageIds.length > 0) {
+        await db.from('face_landmarks').delete().in('face_image_id', faceImageIds);
+      }
+      await db.from('feature_embeddings').delete().in('person_id', personIds);
+      await db.from('face_embeddings').delete().in('person_id', personIds);
+      await db.from('face_images').delete().in('person_id', personIds);
+    }
+
+    // 4b. analyses + their feature_matches
+    const { data: analysisRows } = await db
+      .from('analyses')
+      .select('id')
+      .eq('user_id', userId);
+    const analysisIds = (analysisRows ?? []).map((r) => r.id);
+    if (analysisIds.length > 0) {
+      await db.from('feature_matches').delete().in('analysis_id', analysisIds);
+    }
+
+    // 4c. sibling analyses + their deltas
+    const { data: siblingRows } = await db
+      .from('sibling_analyses')
+      .select('id')
+      .eq('owner_user_id', userId);
+    const siblingIds = (siblingRows ?? []).map((r) => r.id);
+    if (siblingIds.length > 0) {
+      await db.from('sibling_feature_deltas').delete().in('sibling_analysis_id', siblingIds);
+    }
+    await db.from('sibling_analyses').delete().eq('owner_user_id', userId);
+
+    // 4d. analyses & persons & user-scoped tables
+    await db.from('analyses').delete().eq('user_id', userId);
+    await db.from('persons').delete().eq('owner_user_id', userId);
+    await db.from('rate_limit_events').delete().eq('user_id', userId);
+    await db.from('consent_events').delete().eq('user_id', userId);
+    await db.from('profiles').delete().eq('id', userId);
+
+    // 5. Now delete the auth user. With all public-schema references gone,
+    //    this should succeed and free the email for re-registration.
     const { error: authErr } = await db.auth.admin.deleteUser(userId);
     if (authErr) {
       throw new Error(`Failed to delete auth user: ${authErr.message}`);
