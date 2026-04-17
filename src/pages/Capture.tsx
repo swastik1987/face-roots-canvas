@@ -25,6 +25,7 @@ import { CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
 import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from '@/lib/face/detector';
 import { extractPose } from '@/lib/face/pose';
 import { cropAndUploadFeatures, loadImageFromDataUrl } from '@/lib/face/uploadCrops';
+import { normalizeToPortrait } from '@/lib/face/normalize';
 import { useFaceStore } from '@/stores/faceStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -227,11 +228,12 @@ const Capture = () => {
 
     fetch(screenshot)
       .then(r => r.blob())
-      .then(blob => {
+      .then(async (blob) => {
+        const normalizedBlob = await normalizeToPortrait(blob);
         addFrame({
           angle: spec.angle,
           imageDataUrl: screenshot,
-          blob,
+          blob: normalizedBlob,
           landmarkResult,
           blurScore: 0,
           faceConfidence: 1,
