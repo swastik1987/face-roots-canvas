@@ -217,7 +217,8 @@ const Capture = () => {
   // ── Capture ────────────────────────────────────────────────────────────────
 
   const captureFrame = (spec: AngleSpec, landmarkResult: FaceLandmarkerResult) => {
-    const screenshot = webcamRef.current?.getScreenshot({ width: 1280, height: 720 });
+    // Use the webcam's native frame to avoid aspect-ratio distortion.
+    const screenshot = webcamRef.current?.getScreenshot();
     if (!screenshot) return;
     navigator.vibrate?.(30);
 
@@ -227,7 +228,7 @@ const Capture = () => {
 
     fetch(screenshot)
       .then(r => r.blob())
-      .then(blob => {
+      .then((blob) => {
         addFrame({
           angle: spec.angle,
           imageDataUrl: screenshot,
@@ -377,7 +378,12 @@ const Capture = () => {
         <Webcam
           ref={webcamRef}
           audio={false}
-          videoConstraints={{ facingMode: 'user', width: 1280, height: 720 }}
+          videoConstraints={{
+            facingMode: 'user',
+            width: { ideal: 768 },
+            height: { ideal: 1024 },
+            aspectRatio: 3 / 4,
+          }}
           screenshotFormat="image/jpeg"
           screenshotQuality={0.92}
           className="absolute inset-0 w-full h-full object-cover"

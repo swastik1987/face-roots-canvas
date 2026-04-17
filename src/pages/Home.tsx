@@ -62,7 +62,7 @@ function SelfAvatar({
   return (
     <div className="flex flex-col items-center gap-2">
       <motion.div
-        className={`relative w-24 h-24 rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
+        className={`relative w-24 h-24 aspect-square rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
           captured
             ? 'border-cyan shadow-[0_0_16px_rgba(0,229,255,0.4)]'
             : 'border-dashed border-white/20 bg-white/5'
@@ -260,6 +260,13 @@ const Home = () => {
     if (!user || !cropPersonId) return;
 
     try {
+      // Capture existing front photos so we can replace them after the new upload succeeds.
+      const { data: previousFrontImages } = await supabase
+        .from('face_images')
+        .select('id, storage_path')
+        .eq('person_id', cropPersonId)
+        .eq('angle', 'front');
+
       const path = `${user.id}/${cropPersonId}/cropped_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
         .from('face-images-raw')
@@ -267,7 +274,7 @@ const Home = () => {
       if (se) throw se;
 
       // Insert new face_images row
-      await supabase
+      const { data: inserted, error: insertError } = await supabase
         .from('face_images')
         .insert({
           person_id:      cropPersonId,
@@ -275,11 +282,51 @@ const Home = () => {
           angle:          'front',
           capture_method: 'upload_cropped',
           face_confidence: 1,
-        });
+        })
+        .select('id')
+        .single();
+      if (insertError) throw insertError;
+
+      // Remove older front images so analysis and UI always use the newest portrait.
+      const oldFrontImages = (previousFrontImages ?? []).filter((img) => img.id !== inserted.id);
+      if (oldFrontImages.length) {
+        const oldIds = oldFrontImages.map((img) => img.id);
+        const oldPaths = oldFrontImages
+          .map((img) => img.storage_path)
+          .filter(Boolean);
+
+        // Best-effort storage cleanup for raw images.
+        if (oldPaths.length) {
+          await supabase.storage.from('face-images-raw').remove(oldPaths);
+        }
+
+        // Best-effort storage cleanup for per-image feature crops.
+        const cropPaths: string[] = [];
+        for (const imageId of oldIds) {
+          const imagePrefix = `${user.id}/${cropPersonId}/${imageId}`;
+          const { data: crops } = await supabase.storage
+            .from('feature-crops')
+            .list(imagePrefix);
+          if (!crops?.length) continue;
+          for (const file of crops) {
+            cropPaths.push(`${imagePrefix}/${file.name}`);
+          }
+        }
+        if (cropPaths.length) {
+          await supabase.storage.from('feature-crops').remove(cropPaths);
+        }
+
+        // DB delete cascades landmarks/embeddings tied to old front images.
+        await supabase
+          .from('face_images')
+          .delete()
+          .in('id', oldIds);
+      }
 
       // Invalidate thumbnail caches so they refresh
       await queryClient.invalidateQueries({ queryKey: ['self-thumbnail'] });
       await queryClient.invalidateQueries({ queryKey: ['family-thumbnail'] });
+      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
     } catch (err) {
       console.error('Crop save failed', err);
     }
@@ -302,7 +349,7 @@ const Home = () => {
       // 1. Fetch all storage paths for this person's images
       const { data: images } = await supabase
         .from('face_images')
-        .select('storage_path')
+        .select('id, storage_path')
         .eq('person_id', editPerson.id);
 
       // 2. Delete storage files (best-effort — DB cascade is the source of truth)
@@ -313,29 +360,54 @@ const Home = () => {
         }
       }
 
-      // 3. Also remove any feature crops from storage
-      const cropPrefix = `${user.id}/${editPerson.id}/`;
-      const { data: crops } = await supabase.storage
-        .from('face-images-raw')
-        .list(cropPrefix);
-      if (crops?.length) {
-        const cropPaths = crops.map(f => `${cropPrefix}${f.name}`);
-        await supabase.storage.from('face-images-raw').remove(cropPaths);
+      // 3. Also remove any feature crops from storage (best-effort).
+      // Crops are stored under: {userId}/{personId}/{faceImageId}/{featureType}.png
+      if (images?.length) {
+        const cropPaths: string[] = [];
+        for (const image of images) {
+          const imagePrefix = `${user.id}/${editPerson.id}/${image.id}`;
+          const { data: crops } = await supabase.storage
+            .from('feature-crops')
+            .list(imagePrefix);
+          if (!crops?.length) continue;
+          for (const file of crops) {
+            cropPaths.push(`${imagePrefix}/${file.name}`);
+          }
+        }
+
+        if (cropPaths.length) {
+          await supabase.storage.from('feature-crops').remove(cropPaths);
+        }
       }
 
-      // 4. Delete the person row — cascades to face_images, embeddings, etc.
+      // 4. Remove historical feature_matches that reference this person as winner.
+      // Without this, FK constraints can block deleting the person row.
+      const { error: matchDeleteError } = await supabase
+        .from('feature_matches')
+        .delete()
+        .eq('winner_person_id', editPerson.id);
+      if (matchDeleteError) throw matchDeleteError;
+
+      // 5. Delete the person row — cascades to face_images, landmarks, embeddings, etc.
       const { error } = await supabase
         .from('persons')
         .delete()
         .eq('id', editPerson.id);
       if (error) throw error;
 
-      // 5. Refresh UI
-      await queryClient.invalidateQueries({ queryKey: ['persons'] });
+      // 6. Optimistically update local list so the card disappears immediately.
+      queryClient.setQueryData<Person[]>(
+        ['persons', user.id],
+        (existing = []) => existing.filter((p) => p.id !== editPerson.id),
+      );
+
+      // 7. Refresh related queries
+      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
       await queryClient.invalidateQueries({ queryKey: ['family-thumbnail'] });
       await queryClient.invalidateQueries({ queryKey: ['self-thumbnail'] });
 
       setEditPerson(null);
+      setEditSheetOpen(false);
     } catch (err) {
       console.error('Delete member failed', err);
     }
