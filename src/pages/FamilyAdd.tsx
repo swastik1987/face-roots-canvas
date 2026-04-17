@@ -270,7 +270,7 @@ const FamilyAdd = () => {
           });
 
           const transformedResult: FaceLandmarkerResult = {
-            faceLandmarks: [transformedLandmarks],
+            faceLandmarks: [transformedLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z ?? 0, visibility: l.visibility }))],
             faceBlendshapes: detectionResult?.faceBlendshapes ?? [],
             facialTransformationMatrixes: detectionResult?.facialTransformationMatrixes ?? [],
           };
