@@ -1,14 +1,14 @@
 /**
  * delete-my-data — DPDP / GDPR right-to-erasure.
  *
- * Input:  (authed, no body required)
- * Output: { deleted: { tables: number, storage: number } }
- *
  * Steps:
- *   1. Write final consent_events row (event_type='revoked')
- *   2. Purge all storage objects in face-images-raw and feature-crops for this user
- *   3. Delete the profile row (cascades to all other tables via FK on delete cascade)
- *   4. Return receipt
+ *   1. Count rows (for the receipt) BEFORE deletion
+ *   2. Write final consent_events row (event_type='revoked')
+ *   3. Purge all storage objects in the 3 user-scoped buckets
+ *   4. Delete the auth user — this cascades to every public table via FK ON DELETE CASCADE
+ *   5. Return receipt
+ *
+ * After this runs, the same email can sign up fresh.
  */
 import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
@@ -25,7 +25,38 @@ Deno.serve(async (req) => {
 
     const db = getAdminClient();
 
-    // 1. Write revocation consent event
+    // 1. Count rows for the receipt (before anything is deleted)
+    const personIds: string[] = [];
+    const { data: persons } = await db
+      .from('persons')
+      .select('id')
+      .eq('owner_user_id', userId);
+    if (persons) personIds.push(...persons.map((p) => p.id));
+
+    let tableRowsDeleted = 0;
+    const countOpts = { count: 'exact' as const, head: true };
+
+    // user_id-scoped tables
+    for (const table of ['analyses', 'consent_events', 'rate_limit_events'] as const) {
+      const { count } = await db.from(table).select('*', countOpts).eq('user_id', userId);
+      tableRowsDeleted += count ?? 0;
+    }
+    // owner_user_id-scoped tables
+    for (const table of ['persons', 'sibling_analyses'] as const) {
+      const { count } = await db.from(table).select('*', countOpts).eq('owner_user_id', userId);
+      tableRowsDeleted += count ?? 0;
+    }
+    // person_id-scoped child tables
+    if (personIds.length > 0) {
+      for (const table of ['face_images', 'face_embeddings', 'feature_embeddings'] as const) {
+        const { count } = await db.from(table).select('*', countOpts).in('person_id', personIds);
+        tableRowsDeleted += count ?? 0;
+      }
+    }
+    // profile row
+    tableRowsDeleted += 1;
+
+    // 2. Write revocation consent event (last record before erasure)
     await db.from('consent_events').insert({
       user_id: userId,
       event_type: 'revoked',
@@ -34,37 +65,19 @@ Deno.serve(async (req) => {
       user_agent: req.headers.get('user-agent') ?? null,
     });
 
+    // 3. Purge storage
     let storageDeleted = 0;
-
-    // 2. Purge storage — face-images-raw
-    storageDeleted += await purgeUserStorage(db, userId, 'face-images-raw');
-    storageDeleted += await purgeUserStorage(db, userId, 'feature-crops');
-    storageDeleted += await purgeUserStorage(db, userId, 'legacy-cards');
-
-    // 3. Count rows we're about to cascade-delete (for the receipt)
-    const tablesToCount = [
-      'face_images', 'face_embeddings', 'feature_embeddings',
-      'face_landmarks', 'analyses', 'feature_matches',
-    ];
-    let tableRowsDeleted = 0;
-    for (const table of tablesToCount) {
-      // Join through persons for tables that don't have user_id directly
-      const result = await db
-        .from(table)
-        .select('*', { count: 'exact', head: true })
-        .eq(
-          table === 'analyses' ? 'user_id' : 'person_id',
-          table === 'analyses' ? userId : 'irrelevant', // will be handled by cascade
-        );
-      const count = result.error ? 0 : result.count;
-      tableRowsDeleted += count ?? 0;
+    for (const bucket of ['face-images-raw', 'feature-crops', 'legacy-cards']) {
+      storageDeleted += await purgeDirectory(db, bucket, userId);
     }
 
-    // 4. Delete profile — cascades to persons → face_images → everything else
-    await db.from('profiles').delete().eq('id', userId);
-
-    // Also delete the auth user record
-    await db.auth.admin.deleteUser(userId);
+    // 4. Hard-delete the auth user. This frees the email and cascades to every
+    //    public table via FK ON DELETE CASCADE. Throw on failure so the client
+    //    surfaces the error rather than thinking the account is gone.
+    const { error: authErr } = await db.auth.admin.deleteUser(userId);
+    if (authErr) {
+      throw new Error(`Failed to delete auth user: ${authErr.message}`);
+    }
 
     return jsonResponse({
       deleted: {
@@ -78,15 +91,6 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: (err as Error).message }, status);
   }
 });
-
-/** Recursively list and delete all objects in `bucket` under the `userId/` prefix. */
-async function purgeUserStorage(
-  db: ReturnType<typeof import('../_shared/supabaseAdmin.ts').getAdminClient>,
-  userId: string,
-  bucket: string,
-): Promise<number> {
-  return purgeDirectory(db, bucket, userId);
-}
 
 /** Walk a storage directory recursively, deleting all files found. */
 async function purgeDirectory(
@@ -105,19 +109,15 @@ async function purgeDirectory(
 
     if (!entries || entries.length === 0) break;
 
-    // Separate files from folders — Supabase storage list returns
-    // folders as entries with id=null and no metadata
-    const files = entries.filter(e => e.id !== null);
-    const folders = entries.filter(e => e.id === null);
+    const files = entries.filter((e) => e.id !== null);
+    const folders = entries.filter((e) => e.id === null);
 
-    // Delete files in this directory
     if (files.length > 0) {
-      const paths = files.map(f => `${prefix}/${f.name}`);
+      const paths = files.map((f) => `${prefix}/${f.name}`);
       const { data: removed } = await db.storage.from(bucket).remove(paths);
       deleted += removed?.length ?? 0;
     }
 
-    // Recurse into subdirectories
     for (const folder of folders) {
       deleted += await purgeDirectory(db, bucket, `${prefix}/${folder.name}`);
     }
