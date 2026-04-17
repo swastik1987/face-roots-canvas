@@ -162,9 +162,9 @@ const Settings = () => {
       >
         <AlertDialogContent
           className="glass-card border-white/10"
-          onEscapeKeyDown={(e) => deleting && e.preventDefault()}
-          onPointerDownOutside={(e) => deleting && e.preventDefault()}
-          onInteractOutside={(e) => deleting && e.preventDefault()}
+          onEscapeKeyDown={(e) => {
+            if (deleting) e.preventDefault();
+          }}
         >
           <AlertDialogHeader>
             <AlertDialogTitle>
