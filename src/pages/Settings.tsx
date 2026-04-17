@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFaceStore } from '@/stores/faceStore';
 
 const spring = { type: 'spring' as const, stiffness: 260, damping: 20 };
 
