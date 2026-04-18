@@ -12,27 +12,24 @@
  * so the stored portrait is already framed for thumbnails and feature crops.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import Webcam from 'react-webcam';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
-import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from '@/lib/face/detector';
-import { extractPose } from '@/lib/face/pose';
-import { cropAndUploadFeatures, loadImageFromBlob } from '@/lib/face/uploadCrops';
-import { useFaceStore } from '@/stores/faceStore';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
-import { captureEvent } from '@/lib/analytics';
-import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
+import { useCallback, useEffect, useRef, useState } from "react";
+import Webcam from "react-webcam";
+import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, Loader2, RotateCcw } from "lucide-react";
+import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from "@/lib/face/detector";
+import { extractPose } from "@/lib/face/pose";
+import { cropAndUploadFeatures, loadImageFromBlob } from "@/lib/face/uploadCrops";
+import { useFaceStore } from "@/stores/faceStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
+import { captureEvent } from "@/lib/analytics";
+import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 
 // ── Types & constants ─────────────────────────────────────────────────────────
 
-type Step =
-  | 'loading'
-  | 'detecting_front' | 'captured_front'
-  | 'uploading' | 'done' | 'error';
+type Step = "loading" | "detecting_front" | "captured_front" | "uploading" | "done" | "error";
 
 const STABLE_MS = 1200;
 const MIN_FACE_RATIO = 0.18;
@@ -57,11 +54,11 @@ const Capture = () => {
 
   const { addFrame, clearFrames, frames } = useFaceStore();
 
-  const [step, setStep] = useState<Step>('loading');
+  const [step, setStep] = useState<Step>("loading");
   const [hasFace, setHasFace] = useState(false);
   const [stableProgress, setStableProgress] = useState(0);
   const [cameraError, setCameraError] = useState(false);
-  const [uploadError, setUploadError] = useState('');
+  const [uploadError, setUploadError] = useState("");
   const [showFlash, setShowFlash] = useState(false);
   const [alignmentHint, setAlignmentHint] = useState<string | null>(null);
 
@@ -70,18 +67,20 @@ const Capture = () => {
   useEffect(() => {
     let cancelled = false;
     initDetector()
-      .then(() => setRunningMode('VIDEO'))
+      .then(() => setRunningMode("VIDEO"))
       .then(() => {
         if (!cancelled) {
-          setStep('detecting_front');
-          captureEvent('capture_started');
+          setStep("detecting_front");
+          captureEvent("capture_started");
         }
       })
-      .catch(err => {
-        console.error('[FaceBlame] FaceLandmarker init failed', err);
-        if (!cancelled) setStep('error');
+      .catch((err) => {
+        console.error("[FaceBlame] FaceLandmarker init failed", err);
+        if (!cancelled) setStep("error");
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ── Detection loop ─────────────────────────────────────────────────────────
@@ -93,7 +92,7 @@ const Capture = () => {
       return;
     }
 
-    if (step !== 'detecting_front') return;
+    if (step !== "detecting_front") return;
 
     let result: FaceLandmarkerResult;
     try {
@@ -107,7 +106,7 @@ const Capture = () => {
 
     if (!facesFound) {
       setHasFace(false);
-      setAlignmentHint('No face detected');
+      setAlignmentHint("No face detected");
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
@@ -115,12 +114,12 @@ const Capture = () => {
     }
 
     const lms = result.faceLandmarks[0];
-    const xs = lms.map(l => l.x), ys = lms.map(l => l.y);
-    const faceArea =
-      (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    const xs = lms.map((l) => l.x),
+      ys = lms.map((l) => l.y);
+    const faceArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
     if (faceArea < MIN_FACE_RATIO) {
       setHasFace(false);
-      setAlignmentHint('Move closer');
+      setAlignmentHint("Move closer");
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
@@ -162,9 +161,9 @@ const Capture = () => {
       const pitchErr = Math.abs(pose.pitch) - PITCH_MAX;
       let hint: string;
       if (yawErr >= pitchErr) {
-        hint = pose.yaw > 0 ? 'Turn slightly right' : 'Turn slightly left';
+        hint = pose.yaw > 0 ? "Turn slightly right" : "Turn slightly left";
       } else {
-        hint = pose.pitch > 0 ? 'Tilt down' : 'Tilt up';
+        hint = pose.pitch > 0 ? "Tilt down" : "Tilt up";
       }
       setAlignmentHint(hint);
       stableStartRef.current = null;
@@ -175,7 +174,7 @@ const Capture = () => {
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (step === 'detecting_front') rafRef.current = requestAnimationFrame(runDetection);
+    if (step === "detecting_front") rafRef.current = requestAnimationFrame(runDetection);
     return () => cancelAnimationFrame(rafRef.current);
   }, [step, runDetection]);
 
@@ -195,10 +194,12 @@ const Capture = () => {
     const vh = video.videoHeight;
 
     // Face bbox in source pixels
-    const xs = lms.map(l => l.x * vw);
-    const ys = lms.map(l => l.y * vh);
-    const minX = Math.min(...xs), maxX = Math.max(...xs);
-    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const xs = lms.map((l) => l.x * vw);
+    const ys = lms.map((l) => l.y * vh);
+    const minX = Math.min(...xs),
+      maxX = Math.max(...xs);
+    const minY = Math.min(...ys),
+      maxY = Math.max(...ys);
     const fw = maxX - minX;
     const fh = maxY - minY;
     const cx = (minX + maxX) / 2;
@@ -220,13 +221,19 @@ const Capture = () => {
     if (sy < 0) sy = 0;
     if (sx + cropW > vw) sx = vw - cropW;
     if (sy + cropH > vh) sy = vh - cropH;
-    if (sx < 0) { sx = 0; cropW = vw; }
-    if (sy < 0) { sy = 0; cropH = vh; }
+    if (sx < 0) {
+      sx = 0;
+      cropW = vw;
+    }
+    if (sy < 0) {
+      sy = 0;
+      cropH = vh;
+    }
 
-    const canvas = document.createElement('canvas');
+    const canvas = document.createElement("canvas");
     canvas.width = OUTPUT_W;
     canvas.height = OUTPUT_H;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     // Mirror to match selfie-mirrored preview
@@ -237,56 +244,60 @@ const Capture = () => {
     // Normalized bbox of the face within the cropped output (0..1)
     // Account for the horizontal mirror (1 - x)
     const bbox = {
-      x: 1 - ((cx - sx) + fw / 2) / cropW,
+      x: 1 - (cx - sx + fw / 2) / cropW,
       y: (cy - sy - fh / 2) / cropH,
       w: fw / cropW,
       h: fh / cropH,
     };
 
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      addFrame({
-        angle: 'front',
-        imageDataUrl: URL.createObjectURL(blob),
-        blob,
-        landmarkResult,
-        blurScore: 0,
-        faceConfidence: 1,
-        // @ts-expect-error — added at runtime; bbox stored alongside frame
-        bbox,
-      });
-      setStep('captured_front');
-    }, 'image/jpeg', 0.92);
+    canvas.toBlob(
+      async (blob) => {
+        if (!blob) return;
+        addFrame({
+          angle: "front",
+          imageDataUrl: URL.createObjectURL(blob),
+          blob,
+          landmarkResult,
+          blurScore: 0,
+          faceConfidence: 1,
+          // @ts-expect-error — added at runtime; bbox stored alongside frame
+          bbox,
+        });
+        setStep("captured_front");
+      },
+      "image/jpeg",
+      0.92,
+    );
   };
 
   // ── Upload ─────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (step === 'uploading') uploadAllFrames();
+    if (step === "uploading") uploadAllFrames();
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const uploadAllFrames = async () => {
     if (!user) return;
-    setUploadError('');
+    setUploadError("");
     try {
       let { data: selfPerson } = await supabase
-        .from('persons')
-        .select('id')
-        .eq('owner_user_id', user.id)
-        .eq('is_self', true)
+        .from("persons")
+        .select("id")
+        .eq("owner_user_id", user.id)
+        .eq("is_self", true)
         .maybeSingle();
 
       if (!selfPerson) {
         const { data: np, error: pe } = await supabase
-          .from('persons')
+          .from("persons")
           .insert({
             owner_user_id: user.id,
-            display_name: 'Me',
-            relationship_tag: 'self',
+            display_name: "Me",
+            relationship_tag: "self",
             generation: 0,
             is_self: true,
           })
-          .select('id')
+          .select("id")
           .single();
         if (pe) throw pe;
         selfPerson = np;
@@ -297,20 +308,20 @@ const Capture = () => {
         const path = `${user.id}/self/${frame.angle}_${Date.now()}.jpg`;
 
         const { error: se } = await supabase.storage
-          .from('face-images-raw')
-          .upload(path, frame.blob, { contentType: 'image/jpeg' });
+          .from("face-images-raw")
+          .upload(path, frame.blob, { contentType: "image/jpeg" });
         if (se) throw se;
 
         const { data: imgRow, error: ie } = await supabase
-          .from('face_images')
+          .from("face_images")
           .insert({
             person_id: selfPerson.id,
             storage_path: path,
             angle: frame.angle,
-            capture_method: 'guided_capture',
+            capture_method: "guided_capture",
             face_confidence: frame.faceConfidence,
           })
-          .select('id')
+          .select("id")
           .single();
         if (ie) throw ie;
 
@@ -319,7 +330,7 @@ const Capture = () => {
         const matrixArr = matrices?.[0]?.data ? Array.from(matrices[0].data) : null;
         // bbox is attached to the frame at capture time
         const bbox = (frame as unknown as { bbox?: { x: number; y: number; w: number; h: number } }).bbox ?? null;
-        await supabase.from('face_landmarks').insert({
+        await supabase.from("face_landmarks").insert({
           face_image_id: imgRow.id,
           landmarks_json: {
             landmarks: lms.faceLandmarks?.[0] ?? [],
@@ -331,60 +342,52 @@ const Capture = () => {
         // Crop features client-side from the already-oval-cropped portrait.
         try {
           const sourceImg = await loadImageFromBlob(frame.blob);
-          await cropAndUploadFeatures(
-            selfPerson.id,
-            imgRow.id,
-            sourceImg,
-            frame.landmarkResult,
-            frame.angle,
-          );
+          await cropAndUploadFeatures(selfPerson.id, imgRow.id, sourceImg, frame.landmarkResult, frame.angle);
         } catch (cropErr) {
-          console.warn('[Capture] Feature crop upload failed:', cropErr);
+          console.warn("[Capture] Feature crop upload failed:", cropErr);
         }
       }
 
       clearFrames();
-      captureEvent('capture_done');
-      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
-      setStep('done');
+      captureEvent("capture_done");
+      await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });
+      setStep("done");
     } catch (err) {
-      console.error('[FaceBlame] Upload failed', err);
-      setUploadError('Upload failed. Tap retry.');
-      setStep('error');
+      console.error("[FaceBlame] Upload failed", err);
+      setUploadError("Upload failed. Tap retry.");
+      setStep("error");
     }
   };
 
-  const retry = () => { clearFrames(); setStep('detecting_front'); };
+  const retry = () => {
+    clearFrames();
+    setStep("detecting_front");
+  };
 
   // ── Done ───────────────────────────────────────────────────────────────────
 
-  if (step === 'done') {
+  if (step === "done") {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-6">
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
-          transition={{ type: 'spring', stiffness: 260, damping: 18 }}
+          transition={{ type: "spring", stiffness: 260, damping: 18 }}
         >
           <CheckCircle2 size={72} className="text-cyan" />
         </motion.div>
         <h1 className="text-2xl font-bold">All done!</h1>
-        <p className="text-muted-foreground text-center text-sm">
-          Your photo is saved. Add family members next.
-        </p>
-        <button
-          className="btn-gradient px-8 py-3"
-          onClick={() => navigate('/home')}
-        >
+        <p className="text-muted-foreground text-center text-sm">Your photo is saved. Add family members next.</p>
+        <button className="btn-gradient px-8 py-3" onClick={() => navigate("/home")}>
           Back to home
         </button>
       </div>
     );
   }
 
-  const isCapturedStep = step === 'captured_front';
+  const isCapturedStep = step === "captured_front";
 
-  const showLiveCamera = step === 'detecting_front' || step === 'loading';
+  const showLiveCamera = step === "detecting_front" || step === "loading";
 
   return (
     <div className="relative flex flex-col min-h-screen bg-black overflow-hidden">
@@ -394,7 +397,7 @@ const Capture = () => {
           ref={webcamRef}
           audio={false}
           videoConstraints={{
-            facingMode: 'user',
+            facingMode: "user",
             width: { ideal: 768 },
             height: { ideal: 1024 },
             aspectRatio: 3 / 4,
@@ -420,38 +423,34 @@ const Capture = () => {
             initial={{ opacity: 0.85 }}
             animate={{ opacity: 0 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.35, ease: 'easeOut' }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
           />
         )}
       </AnimatePresence>
 
       {/* Oval overlay — full-height, only during live detection */}
       {showLiveCamera && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-6 z-10 pb-8">
           <div
             className="relative"
-            style={{ height: '92vh', aspectRatio: '260/340' }}
+            style={{ height: "85vh", maxHeight: "calc((100vw - 3rem) * 1.307)", aspectRatio: "260/340" }}
           >
-            <OvalOverlay
-              progress={stableProgress}
-              hasFace={hasFace}
-              captured={false}
-            />
+            <OvalOverlay progress={stableProgress} hasFace={hasFace} captured={false} />
             <AnimatePresence mode="wait">
-              {step === 'detecting_front' && (alignmentHint || hasFace) && (
+              {step === "detecting_front" && (alignmentHint || hasFace) && (
                 <motion.div
-                  key={alignmentHint ?? 'aligned'}
-                  className={`absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-medium rounded-full px-3 py-1 border ${
+                  key={alignmentHint ?? "aligned"}
+                  className={`absolute -bottom-12 left-1/2 -translate-x-1/2 whitespace-nowrap text-sm font-medium rounded-full px-5 py-2 border backdrop-blur-md shadow-lg ${
                     alignmentHint
-                      ? 'text-amber-300 bg-amber-300/10 border-amber-300/30'
-                      : 'text-cyan bg-cyan/10 border-cyan/30'
+                      ? "text-amber-300 bg-amber-500/20 border-amber-500/40"
+                      : "text-cyan bg-cyan/20 border-cyan/40"
                   }`}
                   initial={{ opacity: 0, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
                   transition={{ duration: 0.18 }}
                 >
-                  {alignmentHint ?? 'Face detected'}
+                  {alignmentHint ?? "Face detected"}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -461,17 +460,12 @@ const Capture = () => {
 
       {/* Captured-front review: show preview + Retake / Submit */}
       {isCapturedStep && frames.front?.imageDataUrl && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center px-6 z-10">
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-6 z-20 bg-black/70 backdrop-blur-md pb-8">
           <div
             className="relative"
-            style={{ height: '70vh', aspectRatio: '260/340' }}
+            style={{ height: "75vh", maxHeight: "calc((100vw - 3rem) * 1.307)", aspectRatio: "260/340" }}
           >
-            <svg
-              width="100%"
-              height="100%"
-              viewBox="0 0 260 340"
-              preserveAspectRatio="xMidYMid meet"
-            >
+            <svg width="100%" height="100%" viewBox="0 0 260 340" preserveAspectRatio="xMidYMid meet">
               <defs>
                 <clipPath id="review-oval-clip">
                   <ellipse cx="130" cy="170" rx="110" ry="150" />
@@ -479,17 +473,14 @@ const Capture = () => {
               </defs>
               <image
                 href={frames.front.imageDataUrl}
-                x="20" y="20"
-                width="220" height="300"
+                x="20"
+                y="20"
+                width="220"
+                height="300"
                 clipPath="url(#review-oval-clip)"
                 preserveAspectRatio="xMidYMid slice"
               />
-              <ellipse
-                cx="130" cy="170" rx="110" ry="150"
-                fill="none"
-                stroke="rgba(0,229,255,0.9)"
-                strokeWidth="2.5"
-              />
+              <ellipse cx="130" cy="170" rx="110" ry="150" fill="none" stroke="rgba(0,229,255,0.9)" strokeWidth="2.5" />
             </svg>
           </div>
           <div className="flex gap-3 mt-6 w-full max-w-sm">
@@ -499,10 +490,7 @@ const Capture = () => {
             >
               Retake
             </button>
-            <button
-              className="flex-1 btn-gradient px-6 py-3 text-sm"
-              onClick={() => setStep('uploading')}
-            >
+            <button className="flex-1 btn-gradient px-6 py-3 text-sm" onClick={() => setStep("uploading")}>
               Submit
             </button>
           </div>
@@ -510,7 +498,7 @@ const Capture = () => {
       )}
 
       {/* Top instruction bar */}
-      <div className="relative z-10 pt-16 px-6 text-center">
+      <div className="absolute top-0 inset-x-0 z-30 pt-10 md:pt-16 px-6 text-center pointer-events-none drop-shadow-xl bg-gradient-to-b from-black/60 to-transparent pb-8">
         <AnimatePresence mode="wait">
           <motion.div
             key={step}
@@ -519,44 +507,32 @@ const Capture = () => {
             exit={{ opacity: 0, y: 8 }}
             className="space-y-1"
           >
-            {step === 'loading' && (
+            {step === "loading" && (
               <p className="text-white/80 flex items-center justify-center gap-2">
                 <Loader2 size={16} className="animate-spin" />
                 Loading face detector…
               </p>
             )}
-            {step === 'detecting_front' && (
+            {step === "detecting_front" && (
               <>
-                <p className="text-xs text-white/50 uppercase tracking-widest">
-                  Align your face
-                </p>
-                <p className="text-white font-semibold text-lg">
-                  Look straight at the camera
-                </p>
-                <p className="text-white/50 text-sm">
-                  Centre your face inside the oval
-                </p>
+                <p className="text-xs text-white/50 uppercase tracking-widest">Align your face</p>
+                <p className="text-white font-semibold text-lg">Look straight at the camera</p>
+                <p className="text-white/50 text-sm">Centre your face inside the oval</p>
               </>
             )}
             {isCapturedStep && (
               <>
-                <p className="text-xs text-cyan/70 uppercase tracking-widest">
-                  Looks good?
-                </p>
-                <p className="text-white font-semibold text-lg">
-                  Retake or submit to continue
-                </p>
+                <p className="text-xs text-cyan/70 uppercase tracking-widest">Looks good?</p>
+                <p className="text-white font-semibold text-lg">Retake or submit to continue</p>
               </>
             )}
-            {step === 'uploading' && (
+            {step === "uploading" && (
               <p className="text-white/80 flex items-center justify-center gap-2">
                 <Loader2 size={16} className="animate-spin" />
                 Saving your photo…
               </p>
             )}
-            {step === 'error' && (
-              <p className="text-red-400">{uploadError || 'Detector failed to load.'}</p>
-            )}
+            {step === "error" && <p className="text-red-400">{uploadError || "Detector failed to load."}</p>}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -578,22 +554,16 @@ const Capture = () => {
       {cameraError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-20 bg-black px-6 text-center">
           <p className="text-white/80">Camera access denied or unavailable.</p>
-          <button
-            className="btn-gradient px-6 py-2 text-sm"
-            onClick={() => navigate('/home')}
-          >
+          <button className="btn-gradient px-6 py-2 text-sm" onClick={() => navigate("/home")}>
             Go back
           </button>
         </div>
       )}
 
       {/* Retry on error */}
-      {step === 'error' && (
+      {step === "error" && (
         <div className="absolute bottom-12 inset-x-0 flex justify-center z-20">
-          <button
-            className="flex items-center gap-2 btn-gradient px-6 py-3"
-            onClick={retry}
-          >
+          <button className="flex items-center gap-2 btn-gradient px-6 py-3" onClick={retry}>
             <RotateCcw size={16} /> Retry
           </button>
         </div>
@@ -604,43 +574,30 @@ const Capture = () => {
 
 // ── Oval overlay with high-precision alignment grid ──────────────────────────
 
-function OvalOverlay({
-  progress,
-  hasFace,
-  captured,
-}: {
-  progress: number;
-  hasFace: boolean;
-  captured: boolean;
-}) {
+function OvalOverlay({ progress, hasFace, captured }: { progress: number; hasFace: boolean; captured: boolean }) {
   const circumference = 816;
 
-  const baseStroke = captured
-    ? 'rgba(0,229,255,0.9)'
-    : hasFace
-    ? 'rgba(255,255,255,0.6)'
-    : 'rgba(255,255,255,0.25)';
+  const baseStroke = captured ? "rgba(0,229,255,0.9)" : hasFace ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)";
 
   // Grid line opacity & color — brightens with face presence, cyan when locked
-  const gridColor = captured
-    ? 'rgba(0,229,255,0.7)'
-    : hasFace
-    ? 'rgba(255,255,255,0.5)'
-    : 'rgba(255,255,255,0.25)';
+  const gridColor = captured ? "rgba(0,229,255,0.7)" : hasFace ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.25)";
 
   // Oval geometry (must match clip mask)
-  const cx = 130, cy = 170, rx = 110, ry = 150;
+  const cx = 130,
+    cy = 170,
+    rx = 110,
+    ry = 150;
 
   // Feature alignment lines (relative to oval bounding box)
   const top = cy - ry;
   const left = cx - rx;
   const right = cx + rx;
-  const eyeY = top + ry * 2 * 0.33;     // ~33% from top
-  const noseY = top + ry * 2 * 0.58;    // ~58%
-  const mouthY = top + ry * 2 * 0.72;   // ~72%
+  const eyeY = top + ry * 2 * 0.33; // ~33% from top
+  const noseY = top + ry * 2 * 0.58; // ~58%
+  const mouthY = top + ry * 2 * 0.72; // ~72%
 
   return (
-    <svg width="260" height="340" viewBox="0 0 260 340">
+    <svg width="100%" height="100%" viewBox="0 0 260 340" preserveAspectRatio="xMidYMid meet">
       <defs>
         <mask id="oval-mask">
           <rect width="260" height="340" fill="white" />
@@ -657,73 +614,74 @@ function OvalOverlay({
       {/* Inner alignment grid — clipped to oval */}
       <g clipPath="url(#oval-clip)">
         {/* Vertical centre (nose axis) */}
-        <line
-          x1={cx} y1={top} x2={cx} y2={cy + ry}
-          stroke={gridColor}
-          strokeWidth="0.75"
-          strokeDasharray="3 4"
-        />
+        <line x1={cx} y1={top} x2={cx} y2={cy + ry} stroke={gridColor} strokeWidth="0.75" strokeDasharray="3 4" />
         {/* Eye line */}
-        <line
-          x1={left} y1={eyeY} x2={right} y2={eyeY}
-          stroke={gridColor}
-          strokeWidth="0.75"
-          strokeDasharray="3 4"
-        />
+        <line x1={left} y1={eyeY} x2={right} y2={eyeY} stroke={gridColor} strokeWidth="0.75" strokeDasharray="3 4" />
         {/* Nose-tip line (shorter) */}
         <line
-          x1={cx - rx * 0.4} y1={noseY} x2={cx + rx * 0.4} y2={noseY}
+          x1={cx - rx * 0.4}
+          y1={noseY}
+          x2={cx + rx * 0.4}
+          y2={noseY}
           stroke={gridColor}
           strokeWidth="0.75"
           strokeDasharray="2 3"
         />
         {/* Mouth line */}
         <line
-          x1={cx - rx * 0.55} y1={mouthY} x2={cx + rx * 0.55} y2={mouthY}
+          x1={cx - rx * 0.55}
+          y1={mouthY}
+          x2={cx + rx * 0.55}
+          y2={mouthY}
           stroke={gridColor}
           strokeWidth="0.75"
           strokeDasharray="3 4"
         />
         {/* Rule-of-thirds vertical thirds */}
         <line
-          x1={left + (rx * 2) / 3} y1={top} x2={left + (rx * 2) / 3} y2={cy + ry}
-          stroke={gridColor} strokeWidth="0.4" strokeDasharray="1 4" opacity="0.7"
+          x1={left + (rx * 2) / 3}
+          y1={top}
+          x2={left + (rx * 2) / 3}
+          y2={cy + ry}
+          stroke={gridColor}
+          strokeWidth="0.4"
+          strokeDasharray="1 4"
+          opacity="0.7"
         />
         <line
-          x1={left + (rx * 4) / 3} y1={top} x2={left + (rx * 4) / 3} y2={cy + ry}
-          stroke={gridColor} strokeWidth="0.4" strokeDasharray="1 4" opacity="0.7"
+          x1={left + (rx * 4) / 3}
+          y1={top}
+          x2={left + (rx * 4) / 3}
+          y2={cy + ry}
+          stroke={gridColor}
+          strokeWidth="0.4"
+          strokeDasharray="1 4"
+          opacity="0.7"
         />
         {/* Centre crosshair dot */}
         <circle cx={cx} cy={eyeY} r="1.4" fill={gridColor} />
       </g>
 
       {/* Static oval border */}
-      <ellipse
-        cx={cx} cy={cy} rx={rx} ry={ry}
-        fill="none"
-        stroke={baseStroke}
-        strokeWidth="2"
-      />
+      <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={baseStroke} strokeWidth="2" />
       {/* Progress arc */}
       {progress > 0 && !captured && (
         <ellipse
-          cx={cx} cy={cy} rx={rx} ry={ry}
+          cx={cx}
+          cy={cy}
+          rx={rx}
+          ry={ry}
           fill="none"
           stroke="rgba(0,229,255,0.95)"
           strokeWidth="3.5"
           strokeDasharray={`${progress * circumference} ${circumference}`}
           strokeLinecap="round"
-          style={{ transform: 'rotate(-90deg)', transformOrigin: `${cx}px ${cy}px` }}
+          style={{ transform: "rotate(-90deg)", transformOrigin: `${cx}px ${cy}px` }}
         />
       )}
       {/* Full ring when captured */}
       {captured && (
-        <ellipse
-          cx={cx} cy={cy} rx={rx} ry={ry}
-          fill="none"
-          stroke="rgba(0,229,255,0.9)"
-          strokeWidth="3.5"
-        />
+        <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke="rgba(0,229,255,0.9)" strokeWidth="3.5" />
       )}
     </svg>
   );
