@@ -1,67 +1,37 @@
 
 
 ## Goal
-Simplify capture to **front-angle only** with a high-precision guided oval + alignment grid, crop the face to that oval, and reuse the same oval thumbnail across Home and Results.
-
-## Current state
-- `Capture.tsx` runs a 3-angle state machine (front → left → right), uploads full webcam frames + landmarks, then crops features per angle in `uploadCrops.ts`.
-- Side angles add `ear_left`/`ear_right` features but matching/results work fine without them.
-- Home (`SelfAvatar`) and Results (`FaceSilhouette`) currently load the raw stored portrait and rely on CSS `object-position` / SVG `clipPath` to fake an oval crop. The actual stored image is the full webcam frame.
+1. Make the oval guide nearly fill the screen vertically (>80%) so users can easily centre their face.
+2. After auto-capture, show a **preview screen** with the captured face plus **Retake** and **Submit** buttons — only upload on Submit.
 
 ## Changes
 
-### 1. `src/pages/Capture.tsx` — front-only flow
-- Reduce `ANGLE_SEQUENCE` to a single entry (`front`). Drop `detecting_left/right`, `captured_left/right` steps.
-- Remove the 3-step dot indicator; show a single "Align your face" header.
-- Tighten front-angle thresholds for precision: `|yaw| < 8°`, `|pitch| < 8°`, `MIN_FACE_RATIO = 0.18`, `STABLE_MS = 1200`.
-- Replace freeform screenshot with a **canvas-cropped oval portrait** at capture time:
-  - Compute face bbox from landmarks → expand to match oval aspect (ry/rx ≈ 1.36) → pad ~15% → draw to a 768×1024 canvas → export JPEG.
-  - This becomes the stored `face-images-raw` blob (already oval-aligned, no extra processing later).
-- Persist a normalized `bbox` `{x, y, w, h}` (in normalized 0–1 coords of the cropped image) into `face_landmarks.landmarks_json` so downstream UI knows the face is centered.
+### 1. `OvalOverlay` — fill the viewport vertically (`src/pages/Capture.tsx`)
+- Replace the fixed 260×340 SVG with a viewport-responsive oval. Make the SVG container ~92vh tall and width auto-derived from the 3:4 oval aspect (so it scales on any phone).
+- Switch the SVG to `width="100%" height="100%"` filling its container, keep the `viewBox="0 0 260 340"` so all internal grid coordinates stay correct.
+- Container wrapper: `style={{ height: '92vh', aspectRatio: '260/340' }}` centred in the screen, replacing the current fixed-pixel `<div className="relative">`.
+- Remove the `marginTop: '-5%'` offset; centre it cleanly with flex.
+- Net effect: oval fills >80% of the vertical screen, the alignment grid scales with it, the existing capture math (which uses video-pixel coords + landmarks) is unaffected.
 
-### 2. `OvalOverlay` — high-precision grid
-- Add inner alignment guides inside the existing oval:
-  - **Vertical center line** (nose axis)
-  - **Horizontal eye-line** at ~33% from top
-  - **Nose tip line** at ~58%
-  - **Mouth line** at ~72%
-  - Faint **rule-of-thirds** dashed grid across the oval bounding box
-- Lines render at 0.25 opacity normally, brighten to 0.5 when `hasFace` is true, and turn cyan when capture is locked. This gives users a clear feature-alignment target.
-- Keep the progress arc + capture flash unchanged.
+### 2. New `captured_front` review step
+Today `captured_front` auto-advances to `uploading` after 900 ms. Replace that with a manual review screen:
 
-### 3. `src/lib/face/uploadCrops.ts` — front-only feature set
-- Since we no longer capture sides, drop the `angle === 'left' | 'right'` branches that add `ear_left`/`ear_right`. Only `FRONT_FEATURES` are cropped.
-- No schema change — `ear_left/right` simply won't be embedded; matching already handles missing features.
+- Keep capture logic identical (still cropped to 768×1024 oval JPEG and stored in `useFaceStore.frames.front`).
+- After `setStep('captured_front')`, **do not** schedule the timeout to `'uploading'`.
+- Render a full-screen review overlay when `step === 'captured_front'`:
+  - Show the captured oval JPEG (`frames.front.imageDataUrl`) inside a matching oval frame (reuse the same SVG clipPath approach as `FaceSilhouette`) so the user sees exactly what was captured.
+  - Two buttons at the bottom:
+    - **Retake** (ghost / outline): calls existing `retry()` → clears frames, returns to `detecting_front`.
+    - **Submit** (primary `btn-gradient`): sets `step` to `'uploading'`, which triggers the existing `uploadAllFrames()` effect.
+  - Hide the live camera feed and oval grid overlay while in this review state to avoid visual clutter (use `step === 'detecting_front' || step === 'loading'` to gate those).
+- The success checkmark animation that currently shows during `captured_front` is removed (it now belongs in the post-Submit upload flow which already has its own "Saving your photo…" state).
 
-### 4. `src/pages/Home.tsx` — oval thumbnail
-- Stored portrait is now already oval-aligned, so the avatar can drop the `object-position` heuristic and just use `object-cover` with `object-position: center`. Remove the landmark-fetch code in `self-thumbnail` query (simpler + faster).
-- Same simplification for `family-thumbnail` (family upload flow already crops via `FaceCropDialog`).
-
-### 5. `src/components/results/FaceSilhouette.tsx` — oval thumbnail reuse
-- The existing `<image>` with `clipPath="url(#face-clip)"` already does the oval clip; since the source is now pre-cropped to oval, raise its opacity from `0.35` to `0.65` and remove the saturation filter so it reads as the user's actual face behind the pins.
-
-### 6. `match-features` edge function
-- No change needed — it averages whatever angles exist per feature; with one angle it just uses that single embedding (variance-based confidence will be `null`, already handled in UI).
+### 3. Small copy/polish
+- Top instruction bar gains a `captured_front` branch: "Looks good?" / "Retake or submit to continue."
+- The auto-vibrate and shutter flash on capture remain (they signal the photo was taken).
 
 ## Out of scope
-- No DB schema migration.
-- No edge function changes.
-- Family member upload flow is unchanged (already uses `FaceCropDialog`).
-- "Sibling Mode" / Time Machine left as-is.
-
-## Visual sketch
-
-```text
-┌────── camera feed ──────┐
-│      ┌─ ─ ─ ─ ─ ┐       │
-│     ╱             ╲     │   ← oval guide (cyan when locked)
-│    │  · · | · · ·  │    │   ← vertical center
-│    │ ─ ─ ─ ◉ ─ ─ ─ │    │   ← eye line
-│    │     ─ ─ ─     │    │   ← nose tip line
-│    │     ─ ─ ─     │    │   ← mouth line
-│     ╲             ╱     │
-│      └─ ─ ─ ─ ─ ┘       │
-│   "Align your face"     │
-└─────────────────────────┘
-```
+- No DB, edge function, or store schema changes (`useFaceStore` already holds the frame; we're just deferring its consumption).
+- No changes to `uploadCrops.ts`, Home, or Results — same blob is uploaded, just on user confirmation.
+- No new dependencies.
 
