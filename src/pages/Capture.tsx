@@ -1,19 +1,15 @@
 /**
- * /capture — 3-angle guided capture screen.
+ * /capture — Front-only guided capture.
  *
  * State machine:
- *   loading → detecting_front → captured_front →
- *             detecting_left  → captured_left  →
- *             detecting_right → captured_right → uploading → done
+ *   loading → detecting_front → captured_front → uploading → done
  *
  * Advance rules:
- *   Front:  |yaw| < 12° && |pitch| < 12° stable ≥ 1.5 s
- *   Left:   yaw ∈ [+35°, +80°]            stable ≥ 1.5 s
- *   Right:  yaw ∈ [−80°, −35°]            stable ≥ 1.5 s
- *   Face bbox ≥ 12% of frame area.
+ *   |yaw| < 8° && |pitch| < 8° stable ≥ 1.2 s
+ *   Face bbox ≥ 18% of frame area
  *
- * (Ranges intentionally generous to accommodate real-world hand tremor
- * and varying device tilt.)
+ * On capture: crops the face to an oval-aligned 768×1024 JPEG via canvas,
+ * so the stored portrait is already framed for thumbnails and feature crops.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -24,13 +20,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
 import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from '@/lib/face/detector';
 import { extractPose } from '@/lib/face/pose';
-import { cropAndUploadFeatures, loadImageFromDataUrl } from '@/lib/face/uploadCrops';
-import { normalizeToPortrait } from '@/lib/face/normalize';
+import { cropAndUploadFeatures, loadImageFromBlob } from '@/lib/face/uploadCrops';
 import { useFaceStore } from '@/stores/faceStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { captureEvent } from '@/lib/analytics';
-import type { CaptureAngle } from '@/stores/faceStore';
 import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 
 // ── Types & constants ─────────────────────────────────────────────────────────
@@ -38,56 +32,18 @@ import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 type Step =
   | 'loading'
   | 'detecting_front' | 'captured_front'
-  | 'detecting_left'  | 'captured_left'
-  | 'detecting_right' | 'captured_right'
   | 'uploading' | 'done' | 'error';
 
-const STABLE_MS = 1500;
-const MIN_FACE_RATIO = 0.12;
+const STABLE_MS = 1200;
+const MIN_FACE_RATIO = 0.18;
+const YAW_MAX = 8;
+const PITCH_MAX = 8;
 
-type AngleSpec = {
-  label: string;
-  instruction: string;
-  hint: string;
-  angle: CaptureAngle;
-  detecting: Step;
-  captured: Step;
-  next: Step;
-  inRange: (yaw: number, pitch: number) => boolean;
-};
-
-const ANGLE_SEQUENCE: AngleSpec[] = [
-  {
-    label: 'Front',
-    instruction: 'Look straight at the camera',
-    hint: 'Keep your face centred in the oval',
-    angle: 'front',
-    detecting: 'detecting_front',
-    captured: 'captured_front',
-    next: 'detecting_left',
-    inRange: (yaw, pitch) => Math.abs(yaw) < 12 && Math.abs(pitch) < 12,
-  },
-  {
-    label: 'Left side',
-    instruction: 'Slowly turn your head left',
-    hint: 'Turn until your ear is visible',
-    angle: 'left',
-    detecting: 'detecting_left',
-    captured: 'captured_left',
-    next: 'detecting_right',
-    inRange: (yaw) => yaw >= 35 && yaw <= 80,
-  },
-  {
-    label: 'Right side',
-    instruction: 'Slowly turn your head right',
-    hint: 'Turn until your other ear is visible',
-    angle: 'right',
-    detecting: 'detecting_right',
-    captured: 'captured_right',
-    next: 'uploading',
-    inRange: (yaw) => yaw <= -35 && yaw >= -80,
-  },
-];
+// Output canvas dimensions (matches oval portrait aspect ≈ 3:4)
+const OUTPUT_W = 768;
+const OUTPUT_H = 1024;
+// Oval aspect (ry/rx) — keep in sync with OvalOverlay
+const OVAL_ASPECT = 1.36;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -107,13 +63,6 @@ const Capture = () => {
   const [cameraError, setCameraError] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [showFlash, setShowFlash] = useState(false);
-
-  const currentSpec = ANGLE_SEQUENCE.find(
-    s => s.detecting === step || s.captured === step,
-  );
-  const angleIndex = ANGLE_SEQUENCE.findIndex(
-    s => s.detecting === step || s.captured === step,
-  );
 
   // ── Detector init ──────────────────────────────────────────────────────────
 
@@ -143,8 +92,7 @@ const Capture = () => {
       return;
     }
 
-    const spec = ANGLE_SEQUENCE.find(s => s.detecting === step);
-    if (!spec) return;
+    if (step !== 'detecting_front') return;
 
     let result: FaceLandmarkerResult;
     try {
@@ -156,7 +104,6 @@ const Capture = () => {
 
     const facesFound = (result.faceLandmarks?.length ?? 0) > 0;
 
-    // Check face is present before any other work
     if (!facesFound) {
       setHasFace(false);
       stableStartRef.current = null;
@@ -165,7 +112,6 @@ const Capture = () => {
       return;
     }
 
-    // Face size guard — filters background false-positives
     const lms = result.faceLandmarks[0];
     const xs = lms.map(l => l.x), ys = lms.map(l => l.y);
     const faceArea =
@@ -178,7 +124,6 @@ const Capture = () => {
       return;
     }
 
-    // Only show "Face detected" once we pass both guards
     setHasFace(true);
 
     const pose = extractPose(result);
@@ -189,7 +134,7 @@ const Capture = () => {
       return;
     }
 
-    if (spec.inRange(pose.yaw, pose.pitch)) {
+    if (Math.abs(pose.yaw) < YAW_MAX && Math.abs(pose.pitch) < PITCH_MAX) {
       const now = performance.now();
       if (!stableStartRef.current) stableStartRef.current = now;
       const elapsed = now - stableStartRef.current;
@@ -198,7 +143,7 @@ const Capture = () => {
       if (elapsed >= STABLE_MS) {
         stableStartRef.current = null;
         setStableProgress(0);
-        captureFrame(spec, result);
+        captureFrame(result);
         return;
       }
     } else {
@@ -210,38 +155,89 @@ const Capture = () => {
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const isDetecting = ANGLE_SEQUENCE.some(s => s.detecting === step);
-    if (isDetecting) rafRef.current = requestAnimationFrame(runDetection);
+    if (step === 'detecting_front') rafRef.current = requestAnimationFrame(runDetection);
     return () => cancelAnimationFrame(rafRef.current);
   }, [step, runDetection]);
 
-  // ── Capture ────────────────────────────────────────────────────────────────
+  // ── Capture: crop face to oval-aligned canvas ──────────────────────────────
 
-  const captureFrame = (spec: AngleSpec, landmarkResult: FaceLandmarkerResult) => {
-    // Use the webcam's native frame to avoid aspect-ratio distortion.
-    const screenshot = webcamRef.current?.getScreenshot();
-    if (!screenshot) return;
+  const captureFrame = (landmarkResult: FaceLandmarkerResult) => {
+    const video = webcamRef.current?.video;
+    if (!video) return;
+    const lms = landmarkResult.faceLandmarks?.[0];
+    if (!lms) return;
+
     navigator.vibrate?.(30);
-
-    // Trigger flash animation
     setShowFlash(true);
     setTimeout(() => setShowFlash(false), 400);
 
-    fetch(screenshot)
-      .then(r => r.blob())
-      .then(async (blob) => {
-        const normalizedBlob = await normalizeToPortrait(blob);
-        addFrame({
-          angle: spec.angle,
-          imageDataUrl: screenshot,
-          blob: normalizedBlob,
-          landmarkResult,
-          blurScore: 0,
-          faceConfidence: 1,
-        });
-        setStep(spec.captured);
-        setTimeout(() => setStep(spec.next), 900);
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    // Face bbox in source pixels
+    const xs = lms.map(l => l.x * vw);
+    const ys = lms.map(l => l.y * vh);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const fw = maxX - minX;
+    const fh = maxY - minY;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    // Expand to oval aspect (rx, ry where ry/rx = OVAL_ASPECT) + 15% pad
+    const pad = 1.15;
+    let cropH = fh * OVAL_ASPECT * pad;
+    let cropW = cropH / OVAL_ASPECT;
+    if (cropW < fw * pad) {
+      cropW = fw * pad;
+      cropH = cropW * OVAL_ASPECT;
+    }
+
+    // Clamp to source bounds
+    let sx = cx - cropW / 2;
+    let sy = cy - cropH / 2;
+    if (sx < 0) sx = 0;
+    if (sy < 0) sy = 0;
+    if (sx + cropW > vw) sx = vw - cropW;
+    if (sy + cropH > vh) sy = vh - cropH;
+    if (sx < 0) { sx = 0; cropW = vw; }
+    if (sy < 0) { sy = 0; cropH = vh; }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = OUTPUT_W;
+    canvas.height = OUTPUT_H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Mirror to match selfie-mirrored preview
+    ctx.translate(OUTPUT_W, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, OUTPUT_W, OUTPUT_H);
+
+    // Normalized bbox of the face within the cropped output (0..1)
+    // Account for the horizontal mirror (1 - x)
+    const bbox = {
+      x: 1 - ((cx - sx) + fw / 2) / cropW,
+      y: (cy - sy - fh / 2) / cropH,
+      w: fw / cropW,
+      h: fh / cropH,
+    };
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      addFrame({
+        angle: 'front',
+        imageDataUrl: URL.createObjectURL(blob),
+        blob,
+        landmarkResult,
+        blurScore: 0,
+        faceConfidence: 1,
+        // @ts-expect-error — added at runtime; bbox stored alongside frame
+        bbox,
       });
+      setStep('captured_front');
+      setTimeout(() => setStep('uploading'), 900);
+    }, 'image/jpeg', 0.92);
   };
 
   // ── Upload ─────────────────────────────────────────────────────────────────
@@ -302,19 +298,20 @@ const Capture = () => {
         const lms = frame.landmarkResult;
         const matrices = lms.facialTransformationMatrixes;
         const matrixArr = matrices?.[0]?.data ? Array.from(matrices[0].data) : null;
+        // bbox is attached to the frame at capture time
+        const bbox = (frame as unknown as { bbox?: { x: number; y: number; w: number; h: number } }).bbox ?? null;
         await supabase.from('face_landmarks').insert({
           face_image_id: imgRow.id,
           landmarks_json: {
             landmarks: lms.faceLandmarks?.[0] ?? [],
             matrix: matrixArr,
+            bbox,
           },
         });
 
-        // Crop features client-side and upload to feature-crops bucket.
-        // This runs in the browser using Canvas API (no OffscreenCanvas needed).
-        // run-analysis will find these crops via storage listing.
+        // Crop features client-side from the already-oval-cropped portrait.
         try {
-          const sourceImg = await loadImageFromDataUrl(frame.imageDataUrl);
+          const sourceImg = await loadImageFromBlob(frame.blob);
           await cropAndUploadFeatures(
             selfPerson.id,
             imgRow.id,
@@ -323,14 +320,12 @@ const Capture = () => {
             frame.angle,
           );
         } catch (cropErr) {
-          // Non-fatal: analysis can still attempt server-side cropping
           console.warn('[Capture] Feature crop upload failed:', cropErr);
         }
       }
 
       clearFrames();
       captureEvent('capture_done');
-      // Invalidate persons cache so Home immediately shows the newly created self-person
       await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
       setStep('done');
     } catch (err) {
@@ -356,7 +351,7 @@ const Capture = () => {
         </motion.div>
         <h1 className="text-2xl font-bold">All done!</h1>
         <p className="text-muted-foreground text-center text-sm">
-          Your 3 angles are saved. Add family members next.
+          Your photo is saved. Add family members next.
         </p>
         <button
           className="btn-gradient px-8 py-3"
@@ -368,10 +363,7 @@ const Capture = () => {
     );
   }
 
-  const isCapturedStep =
-    step === 'captured_front' ||
-    step === 'captured_left' ||
-    step === 'captured_right';
+  const isCapturedStep = step === 'captured_front';
 
   return (
     <div className="relative flex flex-col min-h-screen bg-black overflow-hidden">
@@ -421,7 +413,6 @@ const Capture = () => {
             hasFace={hasFace}
             captured={isCapturedStep}
           />
-          {/* Face detected badge */}
           <AnimatePresence>
             {hasFace && !isCapturedStep && step !== 'loading' && (
               <motion.div
@@ -434,7 +425,6 @@ const Capture = () => {
               </motion.div>
             )}
           </AnimatePresence>
-          {/* Captured confirmation */}
           <AnimatePresence>
             {isCapturedStep && (
               <motion.div
@@ -469,31 +459,33 @@ const Capture = () => {
                 Loading face detector…
               </p>
             )}
-            {currentSpec && !isCapturedStep && (
+            {step === 'detecting_front' && (
               <>
                 <p className="text-xs text-white/50 uppercase tracking-widest">
-                  Step {angleIndex + 1} of 3 — {currentSpec.label}
+                  Align your face
                 </p>
                 <p className="text-white font-semibold text-lg">
-                  {currentSpec.instruction}
+                  Look straight at the camera
                 </p>
-                <p className="text-white/50 text-sm">{currentSpec.hint}</p>
+                <p className="text-white/50 text-sm">
+                  Centre your face inside the oval
+                </p>
               </>
             )}
-            {isCapturedStep && currentSpec && (
+            {isCapturedStep && (
               <>
                 <p className="text-xs text-cyan/70 uppercase tracking-widest">
-                  ✓ {currentSpec.label} captured
+                  ✓ Captured
                 </p>
                 <p className="text-white font-semibold text-lg">
-                  {angleIndex < 2 ? 'Great! Next angle…' : 'Last one! Almost there…'}
+                  Saving your photo…
                 </p>
               </>
             )}
             {step === 'uploading' && (
               <p className="text-white/80 flex items-center justify-center gap-2">
                 <Loader2 size={16} className="animate-spin" />
-                Saving your photos…
+                Saving your photo…
               </p>
             )}
             {step === 'error' && (
@@ -505,7 +497,7 @@ const Capture = () => {
 
       {/* Progress bar */}
       {stableProgress > 0 && !isCapturedStep && (
-        <div className="absolute bottom-36 inset-x-0 px-10 z-10">
+        <div className="absolute bottom-28 inset-x-0 px-10 z-10">
           <div className="h-1 rounded-full bg-white/15 overflow-hidden">
             <motion.div
               className="h-full bg-gradient-to-r from-cyan to-fuchsia-500 rounded-full"
@@ -515,27 +507,6 @@ const Capture = () => {
           <p className="text-center text-xs text-white/40 mt-1">Hold still…</p>
         </div>
       )}
-
-      {/* Step dots */}
-      <div className="absolute bottom-28 inset-x-0 flex justify-center gap-3 z-10">
-        {ANGLE_SEQUENCE.map((s, i) => {
-          const done = angleIndex > i ||
-            step === 'uploading';
-          const active = i === angleIndex;
-          return (
-            <div
-              key={s.angle}
-              className={`transition-all rounded-full ${
-                done
-                  ? 'w-2.5 h-2.5 bg-cyan'
-                  : active
-                  ? 'w-4 h-2.5 bg-white'
-                  : 'w-2.5 h-2.5 bg-white/25'
-              }`}
-            />
-          );
-        })}
-      </div>
 
       {/* Camera error */}
       {cameraError && (
@@ -565,7 +536,7 @@ const Capture = () => {
   );
 };
 
-// ── Oval overlay ──────────────────────────────────────────────────────────────
+// ── Oval overlay with high-precision alignment grid ──────────────────────────
 
 function OvalOverlay({
   progress,
@@ -576,7 +547,6 @@ function OvalOverlay({
   hasFace: boolean;
   captured: boolean;
 }) {
-  // Ellipse circumference ≈ 2π√((a²+b²)/2) for rx=110, ry=150
   const circumference = 816;
 
   const baseStroke = captured
@@ -585,19 +555,85 @@ function OvalOverlay({
     ? 'rgba(255,255,255,0.6)'
     : 'rgba(255,255,255,0.25)';
 
+  // Grid line opacity & color — brightens with face presence, cyan when locked
+  const gridColor = captured
+    ? 'rgba(0,229,255,0.7)'
+    : hasFace
+    ? 'rgba(255,255,255,0.5)'
+    : 'rgba(255,255,255,0.25)';
+
+  // Oval geometry (must match clip mask)
+  const cx = 130, cy = 170, rx = 110, ry = 150;
+
+  // Feature alignment lines (relative to oval bounding box)
+  const top = cy - ry;
+  const left = cx - rx;
+  const right = cx + rx;
+  const eyeY = top + ry * 2 * 0.33;     // ~33% from top
+  const noseY = top + ry * 2 * 0.58;    // ~58%
+  const mouthY = top + ry * 2 * 0.72;   // ~72%
+
   return (
     <svg width="260" height="340" viewBox="0 0 260 340">
       <defs>
         <mask id="oval-mask">
           <rect width="260" height="340" fill="white" />
-          <ellipse cx="130" cy="170" rx="110" ry="150" fill="black" />
+          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="black" />
         </mask>
+        <clipPath id="oval-clip">
+          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} />
+        </clipPath>
       </defs>
-      {/* Dim the outside of the oval */}
+
+      {/* Dim outside the oval */}
       <rect width="260" height="340" fill="rgba(0,0,0,0.35)" mask="url(#oval-mask)" />
+
+      {/* Inner alignment grid — clipped to oval */}
+      <g clipPath="url(#oval-clip)">
+        {/* Vertical centre (nose axis) */}
+        <line
+          x1={cx} y1={top} x2={cx} y2={cy + ry}
+          stroke={gridColor}
+          strokeWidth="0.75"
+          strokeDasharray="3 4"
+        />
+        {/* Eye line */}
+        <line
+          x1={left} y1={eyeY} x2={right} y2={eyeY}
+          stroke={gridColor}
+          strokeWidth="0.75"
+          strokeDasharray="3 4"
+        />
+        {/* Nose-tip line (shorter) */}
+        <line
+          x1={cx - rx * 0.4} y1={noseY} x2={cx + rx * 0.4} y2={noseY}
+          stroke={gridColor}
+          strokeWidth="0.75"
+          strokeDasharray="2 3"
+        />
+        {/* Mouth line */}
+        <line
+          x1={cx - rx * 0.55} y1={mouthY} x2={cx + rx * 0.55} y2={mouthY}
+          stroke={gridColor}
+          strokeWidth="0.75"
+          strokeDasharray="3 4"
+        />
+        {/* Rule-of-thirds vertical thirds */}
+        <line
+          x1={left + (rx * 2) / 3} y1={top} x2={left + (rx * 2) / 3} y2={cy + ry}
+          stroke={gridColor} strokeWidth="0.4" strokeDasharray="1 4" opacity="0.7"
+        />
+        <line
+          x1={left + (rx * 4) / 3} y1={top} x2={left + (rx * 4) / 3} y2={cy + ry}
+          stroke={gridColor} strokeWidth="0.4" strokeDasharray="1 4" opacity="0.7"
+        />
+        {/* Centre crosshair dot */}
+        <circle cx={cx} cy={eyeY} r="1.4" fill={gridColor} />
+      </g>
+
       {/* Static oval border */}
       <ellipse
-        cx="130" cy="170" rx="110" ry="150"
+        cx={cx} cy={cy} rx={rx} ry={ry}
         fill="none"
         stroke={baseStroke}
         strokeWidth="2"
@@ -605,19 +641,19 @@ function OvalOverlay({
       {/* Progress arc */}
       {progress > 0 && !captured && (
         <ellipse
-          cx="130" cy="170" rx="110" ry="150"
+          cx={cx} cy={cy} rx={rx} ry={ry}
           fill="none"
           stroke="rgba(0,229,255,0.95)"
           strokeWidth="3.5"
           strokeDasharray={`${progress * circumference} ${circumference}`}
           strokeLinecap="round"
-          style={{ transform: 'rotate(-90deg)', transformOrigin: '130px 170px' }}
+          style={{ transform: 'rotate(-90deg)', transformOrigin: `${cx}px ${cy}px` }}
         />
       )}
       {/* Full ring when captured */}
       {captured && (
         <ellipse
-          cx="130" cy="170" rx="110" ry="150"
+          cx={cx} cy={cy} rx={rx} ry={ry}
           fill="none"
           stroke="rgba(0,229,255,0.9)"
           strokeWidth="3.5"
