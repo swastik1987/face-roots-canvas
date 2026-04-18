@@ -625,8 +625,7 @@ function FamilyMemberAvatar({ person }: { person: Person }) {
         <img
           src={thumbnailUrl}
           alt={person.display_name}
-          className="w-full h-full object-cover"
-          style={{ objectPosition: 'center 25%' }}
+          className="w-full h-full object-cover object-center"
         />
       ) : (
         <User size={22} className="text-muted-foreground" aria-hidden="true" />
