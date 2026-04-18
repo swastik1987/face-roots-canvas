@@ -8,16 +8,10 @@
  *   - On confirm: returns a cropped blob (512×512 square, face centred)
  */
 
-import { useRef, useState, useEffect, useCallback } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
-import { Loader2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
-import { initDetector, setRunningMode, detectImage } from '@/lib/face/detector';
+import { useRef, useState, useEffect, useCallback } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Loader2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 
 interface FaceCropDialogProps {
   open: boolean;
@@ -29,11 +23,13 @@ interface FaceCropDialogProps {
 }
 
 /** Compute face centre (normalised 0-1) from all landmarks. */
-function getFaceCentre(
-  landmarks: Array<{ x: number; y: number; z: number }>,
-): { cx: number; cy: number; radius: number } {
-  const xs = landmarks.map(l => l.x);
-  const ys = landmarks.map(l => l.y);
+function getFaceCentre(landmarks: Array<{ x: number; y: number; z: number }>): {
+  cx: number;
+  cy: number;
+  radius: number;
+} {
+  const xs = landmarks.map((l) => l.x);
+  const ys = landmarks.map((l) => l.y);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
@@ -43,18 +39,13 @@ function getFaceCentre(
   const bw = maxX - minX;
   const bh = maxY - minY;
   // Radius: half the larger dimension + 25% padding
-  const radius = Math.max(bw, bh) / 2 * 1.25;
+  const radius = (Math.max(bw, bh) / 2) * 1.25;
   return { cx, cy, radius };
 }
 
 const CROP_SIZE = 512;
 
-export default function FaceCropDialog({
-  open,
-  onOpenChange,
-  imageUrl,
-  onCropConfirm,
-}: FaceCropDialogProps) {
+export default function FaceCropDialog({ open, onOpenChange, imageUrl, onCropConfirm }: FaceCropDialogProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -70,8 +61,8 @@ export default function FaceCropDialog({
   const dragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
 
-  // Guide circle radius (in canvas pixels) — fixed at 45% of canvas size
-  const GUIDE_RATIO = 0.45;
+  const GUIDE_RATIO_X = 0.35; // 35% of canvas width
+  const GUIDE_RATIO_Y = 0.45; // 45% of canvas height (oval aspect)
 
   // Load image + run face detection on open
   useEffect(() => {
@@ -80,7 +71,7 @@ export default function FaceCropDialog({
     setImgLoaded(false);
 
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    img.crossOrigin = "anonymous";
     img.src = imageUrl;
     img.onload = async () => {
       imgRef.current = img;
@@ -88,14 +79,14 @@ export default function FaceCropDialog({
 
       try {
         await initDetector();
-        await setRunningMode('IMAGE');
+        await setRunningMode("IMAGE");
         const result = detectImage(img);
         const faces = result.faceLandmarks ?? [];
 
         if (faces.length > 0) {
           const { cx, cy, radius } = getFaceCentre(faces[0]);
-          // Calculate scale + offset so the face fills the guide circle
-          const guideNorm = GUIDE_RATIO; // guide circle as fraction of canvas
+          // Calculate scale + offset so the face fills the guide oval
+          const guideNorm = GUIDE_RATIO_Y; // scale based on height
           const newScale = guideNorm / radius;
           setScale(Math.min(Math.max(newScale, 1), 5));
           setOffsetX(0.5 - cx);
@@ -125,12 +116,12 @@ export default function FaceCropDialog({
     const img = imgRef.current;
     if (!canvas || !img) return;
 
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext("2d")!;
     const w = canvas.width;
     const h = canvas.height;
 
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#0a0a0a';
+    ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, w, h);
 
     // Compute draw rect: image is drawn centred, then offset + scaled
@@ -149,28 +140,29 @@ export default function FaceCropDialog({
 
     ctx.drawImage(img, dx, dy, drawW, drawH);
 
-    // Dark overlay outside the circle
-    const guideR = w * GUIDE_RATIO;
+    // Dark overlay outside the oval
+    const guideRX = w * GUIDE_RATIO_X;
+    const guideRY = h * GUIDE_RATIO_Y;
     const cx = w / 2;
     const cy = h / 2;
 
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
     ctx.beginPath();
     ctx.rect(0, 0, w, h);
-    ctx.arc(cx, cy, guideR, 0, Math.PI * 2, true);
+    ctx.ellipse(cx, cy, guideRX, guideRY, 0, 0, Math.PI * 2, true);
     ctx.fill();
     ctx.restore();
 
-    // Circle border
-    ctx.strokeStyle = 'rgba(0, 229, 255, 0.7)';
+    // Oval border
+    ctx.strokeStyle = "rgba(0, 229, 255, 0.7)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(cx, cy, guideR, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, guideRX, guideRY, 0, 0, Math.PI * 2);
     ctx.stroke();
 
     // Subtle cross-hair at centre
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(cx - 12, cy);
@@ -210,12 +202,16 @@ export default function FaceCropDialog({
   // Scroll/pinch to zoom
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    setScale(s => Math.min(Math.max(s - e.deltaY * 0.002, 0.5), 5));
+    setScale((s) => Math.min(Math.max(s - e.deltaY * 0.002, 0.5), 5));
   };
 
-  const zoomIn = () => setScale(s => Math.min(s + 0.3, 5));
-  const zoomOut = () => setScale(s => Math.max(s - 0.3, 0.5));
-  const resetView = () => { setScale(1); setOffsetX(0); setOffsetY(0); };
+  const zoomIn = () => setScale((s) => Math.min(s + 0.3, 5));
+  const zoomOut = () => setScale((s) => Math.max(s - 0.3, 0.5));
+  const resetView = () => {
+    setScale(1);
+    setOffsetX(0);
+    setOffsetY(0);
+  };
 
   // ── Crop + confirm ──────────────────────────────────────────────────────────
 
@@ -241,62 +237,65 @@ export default function FaceCropDialog({
     const dx = (w - drawW) / 2 + offsetX * drawW;
     const dy = (h - drawH) / 2 + offsetY * drawH;
 
-    const guideR = w * GUIDE_RATIO;
+    const guideRX = w * GUIDE_RATIO_X;
+    const guideRY = h * GUIDE_RATIO_Y;
     const cx = w / 2;
     const cy = h / 2;
 
-    // The guide circle in image-pixel space
+    // The guide oval bounds in image-pixel space
     const scaleToImg = img.naturalWidth / drawW;
     const srcCx = (cx - dx) * scaleToImg;
     const srcCy = (cy - dy) * scaleToImg;
-    const srcR  = guideR * scaleToImg;
+    const srcRX = guideRX * scaleToImg;
+    const srcRY = guideRY * scaleToImg;
 
-    // Extract a square around the circle, then mask to circle
-    const out = document.createElement('canvas');
+    // Extract a bounding box around the oval, preserving aspect ratio of the bounding box
+    const out = document.createElement("canvas");
+    // Using 512x512 canvas still but adjusting what we draw
     out.width = CROP_SIZE;
     out.height = CROP_SIZE;
-    const octx = out.getContext('2d')!;
+    const octx = out.getContext("2d")!;
 
-    // Clip to circle
+    // We'll mask to the oval output
     octx.beginPath();
-    octx.arc(CROP_SIZE / 2, CROP_SIZE / 2, CROP_SIZE / 2, 0, Math.PI * 2);
+    octx.ellipse(CROP_SIZE / 2, CROP_SIZE / 2, CROP_SIZE / 2, CROP_SIZE / 2, 0, 0, Math.PI * 2);
     octx.clip();
 
-    // Draw the source region
+    // We draw the bounding rect of the oval. Max dimension regulates the square crop
+    const maxDimensionR = Math.max(srcRX, srcRY);
+
     octx.drawImage(
       img,
-      srcCx - srcR,
-      srcCy - srcR,
-      srcR * 2,
-      srcR * 2,
+      srcCx - maxDimensionR,
+      srcCy - maxDimensionR,
+      maxDimensionR * 2,
+      maxDimensionR * 2,
       0,
       0,
       CROP_SIZE,
       CROP_SIZE,
     );
 
-    const dataUrl = out.toDataURL('image/png');
+    const dataUrl = out.toDataURL("image/png");
 
-    // Also produce a square (non-clipped) version for storage (embeddings need full square)
-    const sq = document.createElement('canvas');
+    // Also produce a square (non-clipped) version for storage
+    const sq = document.createElement("canvas");
     sq.width = CROP_SIZE;
     sq.height = CROP_SIZE;
-    const sqctx = sq.getContext('2d')!;
+    const sqctx = sq.getContext("2d")!;
     sqctx.drawImage(
       img,
-      srcCx - srcR,
-      srcCy - srcR,
-      srcR * 2,
-      srcR * 2,
+      srcCx - maxDimensionR,
+      srcCy - maxDimensionR,
+      maxDimensionR * 2,
+      maxDimensionR * 2,
       0,
       0,
       CROP_SIZE,
       CROP_SIZE,
     );
 
-    const blob = await new Promise<Blob>(resolve =>
-      sq.toBlob(b => resolve(b!), 'image/jpeg', 0.92),
-    );
+    const blob = await new Promise<Blob>((resolve) => sq.toBlob((b) => resolve(b!), "image/jpeg", 0.92));
 
     onCropConfirm(blob, dataUrl);
     onOpenChange(false);
@@ -308,7 +307,7 @@ export default function FaceCropDialog({
         <DialogHeader className="px-6 pt-6 pb-2">
           <DialogTitle className="text-base">Crop face</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
-            Position the face inside the circle. Drag to move, scroll to zoom.
+            Position the face inside the oval. Drag to move, scroll to zoom.
           </DialogDescription>
         </DialogHeader>
 
@@ -342,9 +341,7 @@ export default function FaceCropDialog({
           >
             <ZoomOut size={16} />
           </button>
-          <span className="text-xs text-muted-foreground w-12 text-center">
-            {Math.round(scale * 100)}%
-          </span>
+          <span className="text-xs text-muted-foreground w-12 text-center">{Math.round(scale * 100)}%</span>
           <button
             onClick={zoomIn}
             className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
