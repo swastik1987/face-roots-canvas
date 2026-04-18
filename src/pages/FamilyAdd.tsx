@@ -19,13 +19,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw } from "lucide-react";
+import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw, Pencil } from "lucide-react";
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 import { cropAndUploadFeatures } from "@/lib/face/uploadCrops";
 import { normalizeToPortrait } from "@/lib/face/normalize";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
+import FaceCropDialog from "@/components/FaceCropDialog";
 
 const spring = { type: "spring" as const, stiffness: 260, damping: 20 };
 
@@ -120,6 +121,7 @@ const FamilyAdd = () => {
   const [bboxPercent, setBboxPercent] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [name, setName] = useState("");
   const [relationTag, setRelationTag] = useState(searchParams.get("tag") ?? "");
+  const [showCropDialog, setShowCropDialog] = useState(false);
 
   // Cleanup object URLs on unmount
   useEffect(() => {
@@ -393,6 +395,13 @@ const FamilyAdd = () => {
               Looks good — continue
             </button>
             <button
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
+              onClick={() => setShowCropDialog(true)}
+            >
+              <Pencil size={14} />
+              Adjust crop
+            </button>
+            <button
               className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-white/10 text-sm text-muted-foreground hover:bg-white/5 transition-colors"
               onClick={reset}
             >
@@ -401,6 +410,18 @@ const FamilyAdd = () => {
             </button>
           </div>
         </motion.div>
+
+        {/* Adjust crop dialog */}
+        <FaceCropDialog
+          open={showCropDialog}
+          onOpenChange={setShowCropDialog}
+          imageUrl={previewUrl}
+          onCropConfirm={(blob, dataUrl) => {
+            setCropBlob(blob);
+            setCropUrl(dataUrl);
+            setShowCropDialog(false);
+          }}
+        />
       </div>
     );
   }
