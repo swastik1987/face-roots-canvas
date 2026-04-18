@@ -1,40 +1,44 @@
-import { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Plus, User, Loader2, AlertCircle, RefreshCw, CheckCircle2, Clock } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Skeleton } from '@/components/ui/skeleton';
-import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/contexts/AuthContext';
-import { captureEvent } from '@/lib/analytics';
-import { ensureAllCropsUploaded } from '@/lib/face/uploadCrops';
-import { normalizeToPortrait } from '@/lib/face/normalize';
-import PhotoEditSheet from '@/components/PhotoEditSheet';
-import FaceCropDialog from '@/components/FaceCropDialog';
-import type { Person } from '@/lib/supabase';
+import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
+import { Plus, User, Loader2, AlertCircle, RefreshCw, CheckCircle2, Clock } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { captureEvent } from "@/lib/analytics";
+import { ensureAllCropsUploaded } from "@/lib/face/uploadCrops";
+import { normalizeToPortrait } from "@/lib/face/normalize";
+import PhotoEditSheet from "@/components/PhotoEditSheet";
+import FaceCropDialog from "@/components/FaceCropDialog";
+import type { Person } from "@/lib/supabase";
 
-const spring = { type: 'spring' as const, stiffness: 300, damping: 26 };
+const spring = { type: "spring" as const, stiffness: 300, damping: 26 };
 
 // Relationship slots shown on the home screen
 const EMPTY_SLOTS = [
-  { label: 'Add Mom',         tag: 'mother'          },
-  { label: 'Add Dad',         tag: 'father'          },
-  { label: 'Add Grandparent', tag: 'maternal_grandma'},
-  { label: 'Add Sibling',     tag: 'sibling'         },
+  { label: "Add Mom", tag: "mother" },
+  { label: "Add Dad", tag: "father" },
+  { label: "Add Grandparent", tag: "maternal_grandma" },
+  { label: "Add Sibling", tag: "sibling" },
 ];
 
 // ── Loading skeleton ───────────────────────────────────────────────────────────
 
 function HomeSkeleton() {
   return (
-    <div className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24" aria-busy="true" aria-label="Loading family tree">
+    <div
+      className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24"
+      aria-busy="true"
+      aria-label="Loading family tree"
+    >
       <Skeleton className="h-7 w-36 rounded-lg" />
       <div className="flex flex-col items-center gap-2">
         <Skeleton className="w-24 h-24 rounded-full" />
         <Skeleton className="h-4 w-20 rounded" />
       </div>
       <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
-        {[0, 1, 2, 3].map(i => (
+        {[0, 1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-28 rounded-2xl" />
         ))}
       </div>
@@ -63,24 +67,25 @@ function SelfAvatar({
   return (
     <div className="flex flex-col items-center gap-2">
       <motion.div
-        className={`relative w-24 h-24 aspect-square rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
-          captured
-            ? 'border-cyan shadow-[0_0_16px_rgba(0,229,255,0.4)]'
-            : 'border-dashed border-white/20 bg-white/5'
+        className={`relative w-24 h-32 rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
+          captured ? "border-cyan shadow-[0_0_16px_rgba(0,229,255,0.4)]" : "border-dashed border-white/20 bg-white/5"
         }`}
+        style={{ borderRadius: "50% / 50%", aspectRatio: "auto" }} // Explicitly override rounded-full constraint for an oval
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ ...spring, delay: 0.1 }}
         onClick={captured ? onEdit : onClick}
         role="button"
         tabIndex={0}
-        aria-label={captured ? `${self.display_name} — tap to edit photo` : 'Add your photo'}
-        onKeyDown={e => { if (e.key === 'Enter') (captured ? onEdit : onClick)(); }}
+        aria-label={captured ? `${self.display_name} — tap to edit photo` : "Add your photo"}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (captured ? onEdit : onClick)();
+        }}
       >
         {thumbnailUrl ? (
           <img
             src={thumbnailUrl}
-            alt={self?.display_name ?? 'You'}
+            alt={self?.display_name ?? "You"}
             className="w-full h-full object-cover"
             style={{ objectPosition: facePosition }}
           />
@@ -92,20 +97,16 @@ function SelfAvatar({
 
         {/* Captured badge */}
         {captured && (
-          <div className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-cyan flex items-center justify-center border-2 border-background">
+          <div className="absolute bottom-1 right-2 w-6 h-6 rounded-full bg-cyan flex items-center justify-center border-2 border-background">
             <CheckCircle2 size={12} className="text-background" />
           </div>
         )}
       </motion.div>
 
-      <span className="text-sm font-medium">
-        {captured ? self.display_name : (
-          <span className="text-muted-foreground">Add yourself</span>
-        )}
+      <span className="text-sm font-medium mt-1">
+        {captured ? self.display_name : <span className="text-muted-foreground">Add yourself</span>}
       </span>
-      {captured && (
-        <span className="text-xs text-cyan/70">Captured ✓</span>
-      )}
+      {captured && <span className="text-xs text-cyan/70">Captured ✓</span>}
     </div>
   );
 }
@@ -134,67 +135,65 @@ const Home = () => {
     isError,
     refetch,
   } = useQuery<Person[]>({
-    queryKey: ['persons', user?.id],
+    queryKey: ["persons", user?.id],
     enabled: !!user,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('persons')
-        .select('*')
-        .eq('owner_user_id', user!.id)
-        .order('created_at', { ascending: true });
+        .from("persons")
+        .select("*")
+        .eq("owner_user_id", user!.id)
+        .order("created_at", { ascending: true });
       if (error) throw error;
       return data ?? [];
     },
   });
 
-  const self   = persons.find(p => p.is_self);
-  const family = persons.filter(p => !p.is_self);
+  const self = persons.find((p) => p.is_self);
+  const family = persons.filter((p) => !p.is_self);
 
   // Stored portrait is already oval-cropped at capture time → just need a signed URL.
   const { data: selfThumbnailUrl = null } = useQuery<string | null>({
-    queryKey: ['self-thumbnail', self?.id],
+    queryKey: ["self-thumbnail", self?.id],
     enabled: !!self?.id,
     staleTime: 300_000,
     queryFn: async () => {
       const { data: images } = await supabase
-        .from('face_images')
-        .select('storage_path')
-        .eq('person_id', self!.id)
-        .eq('angle', 'front')
-        .order('created_at', { ascending: false })
+        .from("face_images")
+        .select("storage_path")
+        .eq("person_id", self!.id)
+        .eq("angle", "front")
+        .order("created_at", { ascending: false })
         .limit(1);
 
       const path = images?.[0]?.storage_path;
       if (!path) return null;
 
-      const { data } = await supabase.storage
-        .from('face-images-raw')
-        .createSignedUrl(path, 900);
+      const { data } = await supabase.storage.from("face-images-raw").createSignedUrl(path, 900);
       return data?.signedUrl ?? null;
     },
   });
 
-  const selfFacePosition = 'center';
+  const selfFacePosition = "center";
 
-  const [analyzing, setAnalyzing]       = useState(false);
-  const [analyzeError, setAnalyzeError] = useState('');
-  const [analyzeStatus, setAnalyzeStatus] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState("");
+  const [analyzeStatus, setAnalyzeStatus] = useState("");
 
   // Photo edit sheet state
-  const [editSheetOpen, setEditSheetOpen]   = useState(false);
-  const [editPerson, setEditPerson]         = useState<Person | null>(null);
-  const [editPhotoUrl, setEditPhotoUrl]     = useState<string | null>(null);
+  const [editSheetOpen, setEditSheetOpen] = useState(false);
+  const [editPerson, setEditPerson] = useState<Person | null>(null);
+  const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null);
 
   // Face crop dialog state
-  const [cropOpen, setCropOpen]             = useState(false);
-  const [cropImageUrl, setCropImageUrl]     = useState('');
-  const [cropPersonId, setCropPersonId]     = useState<string | null>(null);
+  const [cropOpen, setCropOpen] = useState(false);
+  const [cropImageUrl, setCropImageUrl] = useState("");
+  const [cropPersonId, setCropPersonId] = useState<string | null>(null);
 
   const canAnalyze = !!self && family.length >= 1;
 
   // Determine which empty slots still need to be filled
-  const filledTags = new Set(family.map(p => p.relationship_tag));
-  const emptySlots = EMPTY_SLOTS.filter(s => !filledTags.has(s.tag));
+  const filledTags = new Set(family.map((p) => p.relationship_tag));
+  const emptySlots = EMPTY_SLOTS.filter((s) => !filledTags.has(s.tag));
 
   // ── Open edit sheet for a person ──────────────────────────────────────────
 
@@ -215,91 +214,90 @@ const Home = () => {
 
   // ── Handle crop confirm — re-upload cropped image ─────────────────────────
 
-  const handleCropConfirm = useCallback(async (blob: Blob) => {
-    if (!user || !cropPersonId) return;
+  const handleCropConfirm = useCallback(
+    async (blob: Blob) => {
+      if (!user || !cropPersonId) return;
 
-    try {
-      // Capture existing front photos so we can replace them after the new upload succeeds.
-      const { data: previousFrontImages } = await supabase
-        .from('face_images')
-        .select('id, storage_path')
-        .eq('person_id', cropPersonId)
-        .eq('angle', 'front');
+      try {
+        // Capture existing front photos so we can replace them after the new upload succeeds.
+        const { data: previousFrontImages } = await supabase
+          .from("face_images")
+          .select("id, storage_path")
+          .eq("person_id", cropPersonId)
+          .eq("angle", "front");
 
-      const normalizedBlob = await normalizeToPortrait(blob);
+        const normalizedBlob = await normalizeToPortrait(blob);
 
-      const path = `${user.id}/${cropPersonId}/cropped_${Date.now()}.jpg`;
-      const { error: se } = await supabase.storage
-        .from('face-images-raw')
-        .upload(path, normalizedBlob, { contentType: 'image/jpeg' });
-      if (se) throw se;
+        const path = `${user.id}/${cropPersonId}/cropped_${Date.now()}.jpg`;
+        const { error: se } = await supabase.storage
+          .from("face-images-raw")
+          .upload(path, normalizedBlob, { contentType: "image/jpeg" });
+        if (se) throw se;
 
-      // Insert new face_images row
-      const { data: inserted, error: insertError } = await supabase
-        .from('face_images')
-        .insert({
-          person_id:      cropPersonId,
-          storage_path:   path,
-          angle:          'front',
-          capture_method: 'upload_cropped',
-          face_confidence: 1,
-        })
-        .select('id')
-        .single();
-      if (insertError) throw insertError;
+        // Insert new face_images row
+        const { data: inserted, error: insertError } = await supabase
+          .from("face_images")
+          .insert({
+            person_id: cropPersonId,
+            storage_path: path,
+            angle: "front",
+            capture_method: "upload_cropped",
+            face_confidence: 1,
+          })
+          .select("id")
+          .single();
+        if (insertError) throw insertError;
 
-      // Remove older front images so analysis and UI always use the newest portrait.
-      const oldFrontImages = (previousFrontImages ?? []).filter((img) => img.id !== inserted.id);
-      if (oldFrontImages.length) {
-        const oldIds = oldFrontImages.map((img) => img.id);
-        const oldPaths = oldFrontImages
-          .map((img) => img.storage_path)
-          .filter(Boolean);
+        // Remove older front images so analysis and UI always use the newest portrait.
+        const oldFrontImages = (previousFrontImages ?? []).filter((img) => img.id !== inserted.id);
+        if (oldFrontImages.length) {
+          const oldIds = oldFrontImages.map((img) => img.id);
+          const oldPaths = oldFrontImages.map((img) => img.storage_path).filter(Boolean);
 
-        // Best-effort storage cleanup for raw images.
-        if (oldPaths.length) {
-          await supabase.storage.from('face-images-raw').remove(oldPaths);
-        }
-
-        // Best-effort storage cleanup for per-image feature crops.
-        const cropPaths: string[] = [];
-        for (const imageId of oldIds) {
-          const imagePrefix = `${user.id}/${cropPersonId}/${imageId}`;
-          const { data: crops } = await supabase.storage
-            .from('feature-crops')
-            .list(imagePrefix);
-          if (!crops?.length) continue;
-          for (const file of crops) {
-            cropPaths.push(`${imagePrefix}/${file.name}`);
+          // Best-effort storage cleanup for raw images.
+          if (oldPaths.length) {
+            await supabase.storage.from("face-images-raw").remove(oldPaths);
           }
-        }
-        if (cropPaths.length) {
-          await supabase.storage.from('feature-crops').remove(cropPaths);
+
+          // Best-effort storage cleanup for per-image feature crops.
+          const cropPaths: string[] = [];
+          for (const imageId of oldIds) {
+            const imagePrefix = `${user.id}/${cropPersonId}/${imageId}`;
+            const { data: crops } = await supabase.storage.from("feature-crops").list(imagePrefix);
+            if (!crops?.length) continue;
+            for (const file of crops) {
+              cropPaths.push(`${imagePrefix}/${file.name}`);
+            }
+          }
+          if (cropPaths.length) {
+            await supabase.storage.from("feature-crops").remove(cropPaths);
+          }
+
+          // DB delete cascades landmarks/embeddings tied to old front images.
+          await supabase.from("face_images").delete().in("id", oldIds);
         }
 
-        // DB delete cascades landmarks/embeddings tied to old front images.
-        await supabase
-          .from('face_images')
-          .delete()
-          .in('id', oldIds);
+        // Invalidate thumbnail caches so they refresh
+        await queryClient.invalidateQueries({ queryKey: ["self-thumbnail"] });
+        await queryClient.invalidateQueries({ queryKey: ["family-thumbnail"] });
+        await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });
+      } catch (err) {
+        console.error("Crop save failed", err);
       }
-
-      // Invalidate thumbnail caches so they refresh
-      await queryClient.invalidateQueries({ queryKey: ['self-thumbnail'] });
-      await queryClient.invalidateQueries({ queryKey: ['family-thumbnail'] });
-      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
-    } catch (err) {
-      console.error('Crop save failed', err);
-    }
-  }, [user, cropPersonId, queryClient]);
+    },
+    [user, cropPersonId, queryClient],
+  );
 
   // ── Handle family member re-upload ────────────────────────────────────────
 
-  const handleFamilyReupload = useCallback((file: File) => {
-    if (!editPerson) return;
-    // Navigate to family add page with person_id for replacement
-    navigate(`/family/add?tag=${editPerson.relationship_tag}`);
-  }, [editPerson, navigate]);
+  const handleFamilyReupload = useCallback(
+    (file: File) => {
+      if (!editPerson) return;
+      // Navigate to family add page with person_id for replacement
+      navigate(`/family/add?tag=${editPerson.relationship_tag}`);
+    },
+    [editPerson, navigate],
+  );
 
   // ── Handle delete member ─────────────────────────────────────────────────
 
@@ -309,15 +307,15 @@ const Home = () => {
     try {
       // 1. Fetch all storage paths for this person's images
       const { data: images } = await supabase
-        .from('face_images')
-        .select('id, storage_path')
-        .eq('person_id', editPerson.id);
+        .from("face_images")
+        .select("id, storage_path")
+        .eq("person_id", editPerson.id);
 
       // 2. Delete storage files (best-effort — DB cascade is the source of truth)
       if (images?.length) {
-        const paths = images.map(i => i.storage_path).filter(Boolean);
+        const paths = images.map((i) => i.storage_path).filter(Boolean);
         if (paths.length) {
-          await supabase.storage.from('face-images-raw').remove(paths);
+          await supabase.storage.from("face-images-raw").remove(paths);
         }
       }
 
@@ -327,9 +325,7 @@ const Home = () => {
         const cropPaths: string[] = [];
         for (const image of images) {
           const imagePrefix = `${user.id}/${editPerson.id}/${image.id}`;
-          const { data: crops } = await supabase.storage
-            .from('feature-crops')
-            .list(imagePrefix);
+          const { data: crops } = await supabase.storage.from("feature-crops").list(imagePrefix);
           if (!crops?.length) continue;
           for (const file of crops) {
             cropPaths.push(`${imagePrefix}/${file.name}`);
@@ -337,40 +333,36 @@ const Home = () => {
         }
 
         if (cropPaths.length) {
-          await supabase.storage.from('feature-crops').remove(cropPaths);
+          await supabase.storage.from("feature-crops").remove(cropPaths);
         }
       }
 
       // 4. Remove historical feature_matches that reference this person as winner.
       // Without this, FK constraints can block deleting the person row.
       const { error: matchDeleteError } = await supabase
-        .from('feature_matches')
+        .from("feature_matches")
         .delete()
-        .eq('winner_person_id', editPerson.id);
+        .eq("winner_person_id", editPerson.id);
       if (matchDeleteError) throw matchDeleteError;
 
       // 5. Delete the person row — cascades to face_images, landmarks, embeddings, etc.
-      const { error } = await supabase
-        .from('persons')
-        .delete()
-        .eq('id', editPerson.id);
+      const { error } = await supabase.from("persons").delete().eq("id", editPerson.id);
       if (error) throw error;
 
       // 6. Optimistically update local list so the card disappears immediately.
-      queryClient.setQueryData<Person[]>(
-        ['persons', user.id],
-        (existing = []) => existing.filter((p) => p.id !== editPerson.id),
+      queryClient.setQueryData<Person[]>(["persons", user.id], (existing = []) =>
+        existing.filter((p) => p.id !== editPerson.id),
       );
 
       // 7. Refresh related queries
-      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
-      await queryClient.invalidateQueries({ queryKey: ['family-thumbnail'] });
-      await queryClient.invalidateQueries({ queryKey: ['self-thumbnail'] });
+      await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });
+      await queryClient.invalidateQueries({ queryKey: ["family-thumbnail"] });
+      await queryClient.invalidateQueries({ queryKey: ["self-thumbnail"] });
 
       setEditPerson(null);
       setEditSheetOpen(false);
     } catch (err) {
-      console.error('Delete member failed', err);
+      console.error("Delete member failed", err);
     }
   }, [editPerson, user, queryClient]);
 
@@ -379,9 +371,9 @@ const Home = () => {
   const startAnalysis = async () => {
     if (!self || !user) return;
     setAnalyzing(true);
-    setAnalyzeError('');
-    setAnalyzeStatus('Preparing feature crops…');
-    captureEvent('analysis_started', { self_person_id: self.id });
+    setAnalyzeError("");
+    setAnalyzeStatus("Preparing feature crops…");
+    captureEvent("analysis_started", { self_person_id: self.id });
     try {
       // Ensure all face images have feature crops + CLIP embeddings.
       // This backfills any images missing crops/embeddings by:
@@ -393,26 +385,25 @@ const Home = () => {
         setAnalyzeStatus(`Preparing features… ${done}/${total}`);
       });
 
-      setAnalyzeStatus('Starting analysis…');
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/run-analysis`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({ self_person_id: self.id }),
+      setAnalyzeStatus("Starting analysis…");
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/run-analysis`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
         },
-      );
+        body: JSON.stringify({ self_person_id: self.id }),
+      });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Analysis failed to start');
+      if (!res.ok) throw new Error(json.error ?? "Analysis failed to start");
       navigate(`/analysis/${json.analysis_id}`);
     } catch (err) {
       setAnalyzeError((err as Error).message);
       setAnalyzing(false);
-      setAnalyzeStatus('');
+      setAnalyzeStatus("");
     }
   };
 
@@ -424,9 +415,7 @@ const Home = () => {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-6" role="alert">
         <AlertCircle size={36} className="text-destructive" aria-hidden="true" />
-        <p className="text-sm text-muted-foreground text-center">
-          Could not load your family tree. Please try again.
-        </p>
+        <p className="text-sm text-muted-foreground text-center">Could not load your family tree. Please try again.</p>
         <button
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 transition-colors text-sm font-medium"
           onClick={() => refetch()}
@@ -445,12 +434,7 @@ const Home = () => {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <main className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24">
-      <motion.h1
-        className="text-2xl font-bold"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={spring}
-      >
+      <motion.h1 className="text-2xl font-bold" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={spring}>
         Your family
       </motion.h1>
 
@@ -459,7 +443,7 @@ const Home = () => {
         self={self}
         thumbnailUrl={selfThumbnailUrl}
         facePosition={selfFacePosition}
-        onClick={() => navigate('/capture')}
+        onClick={() => navigate("/capture")}
         onEdit={() => self && openEditSheet(self, selfThumbnailUrl)}
       />
 
@@ -479,17 +463,15 @@ const Home = () => {
                 // so we fetch it here too for the sheet
                 const fetchAndOpen = async () => {
                   const { data: images } = await supabase
-                    .from('face_images')
-                    .select('storage_path')
-                    .eq('person_id', person.id)
-                    .order('created_at', { ascending: false })
+                    .from("face_images")
+                    .select("storage_path")
+                    .eq("person_id", person.id)
+                    .order("created_at", { ascending: false })
                     .limit(1);
                   const path = images?.[0]?.storage_path;
                   let url: string | null = null;
                   if (path) {
-                    const { data } = await supabase.storage
-                      .from('face-images-raw')
-                      .createSignedUrl(path, 900);
+                    const { data } = await supabase.storage.from("face-images-raw").createSignedUrl(path, 900);
                     url = data?.signedUrl ?? null;
                   }
                   openEditSheet(person, url);
@@ -498,12 +480,14 @@ const Home = () => {
               }}
               tabIndex={0}
               aria-label={`${person.display_name} — tap to edit photo`}
-              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.click(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.click();
+              }}
             >
               <FamilyMemberAvatar person={person} />
               <span className="text-xs font-medium text-center leading-tight">{person.display_name}</span>
               <span className="text-xs text-muted-foreground capitalize">
-                {person.relationship_tag.replace(/_/g, ' ')}
+                {person.relationship_tag.replace(/_/g, " ")}
               </span>
             </motion.div>
           ))}
@@ -534,10 +518,10 @@ const Home = () => {
       <div className="flex flex-col items-center gap-2">
         <motion.button
           className="btn-gradient px-8 py-3 text-base mt-4 disabled:opacity-40 flex items-center gap-2"
-          onClick={canAnalyze ? startAnalysis : () => navigate('/capture')}
+          onClick={canAnalyze ? startAnalysis : () => navigate("/capture")}
           disabled={analyzing}
           aria-busy={analyzing}
-          aria-label={canAnalyze ? 'Start Family DNA analysis' : 'Add yourself and a family member to start'}
+          aria-label={canAnalyze ? "Start Family DNA analysis" : "Add yourself and a family member to start"}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ ...spring, delay: 0.4 }}
@@ -545,12 +529,10 @@ const Home = () => {
           whileTap={!analyzing ? { scale: 0.97 } : {}}
         >
           {analyzing && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-          {canAnalyze ? 'Discover your Family DNA' : 'Add yourself + 1 family member to start'}
+          {canAnalyze ? "Discover your Family DNA" : "Add yourself + 1 family member to start"}
         </motion.button>
 
-        {analyzing && analyzeStatus && (
-          <p className="text-xs text-cyan/70 animate-pulse">{analyzeStatus}</p>
-        )}
+        {analyzing && analyzeStatus && <p className="text-xs text-cyan/70 animate-pulse">{analyzeStatus}</p>}
 
         {analyzeError && (
           <div className="flex flex-col items-center gap-1.5 max-w-xs" role="alert">
@@ -599,34 +581,31 @@ const Home = () => {
 
 function FamilyMemberAvatar({ person }: { person: Person }) {
   const { data: thumbnailUrl } = useQuery<string | null>({
-    queryKey: ['family-thumbnail', person.id],
+    queryKey: ["family-thumbnail", person.id],
     staleTime: 300_000,
     queryFn: async () => {
       const { data: images } = await supabase
-        .from('face_images')
-        .select('storage_path')
-        .eq('person_id', person.id)
-        .order('created_at', { ascending: false })
+        .from("face_images")
+        .select("storage_path")
+        .eq("person_id", person.id)
+        .order("created_at", { ascending: false })
         .limit(1);
 
       const path = images?.[0]?.storage_path;
       if (!path) return null;
 
-      const { data } = await supabase.storage
-        .from('face-images-raw')
-        .createSignedUrl(path, 900);
+      const { data } = await supabase.storage.from("face-images-raw").createSignedUrl(path, 900);
       return data?.signedUrl ?? null;
     },
   });
 
   return (
-    <div className="w-14 h-14 rounded-full overflow-hidden border border-white/15 bg-white/10 flex items-center justify-center">
+    <div
+      className="w-16 h-20 rounded-full overflow-hidden border border-white/15 bg-white/10 flex items-center justify-center"
+      style={{ borderRadius: "50% / 50%" }}
+    >
       {thumbnailUrl ? (
-        <img
-          src={thumbnailUrl}
-          alt={person.display_name}
-          className="w-full h-full object-cover object-center"
-        />
+        <img src={thumbnailUrl} alt={person.display_name} className="w-full h-full object-cover object-center" />
       ) : (
         <User size={22} className="text-muted-foreground" aria-hidden="true" />
       )}
