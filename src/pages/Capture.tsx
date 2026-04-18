@@ -541,10 +541,10 @@ const Capture = () => {
             {isCapturedStep && (
               <>
                 <p className="text-xs text-cyan/70 uppercase tracking-widest">
-                  ✓ Captured
+                  Looks good?
                 </p>
                 <p className="text-white font-semibold text-lg">
-                  Saving your photo…
+                  Retake or submit to continue
                 </p>
               </>
             )}
