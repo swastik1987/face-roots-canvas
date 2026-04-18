@@ -150,73 +150,31 @@ const Home = () => {
   const self   = persons.find(p => p.is_self);
   const family = persons.filter(p => !p.is_self);
 
-  // Fetch the self person's front-angle thumbnail + face position (only when self exists)
-  const { data: selfThumbnailData = null } = useQuery<{
-    url: string;
-    facePosition: string; // CSS object-position value
-  } | null>({
+  // Stored portrait is already oval-cropped at capture time → just need a signed URL.
+  const { data: selfThumbnailUrl = null } = useQuery<string | null>({
     queryKey: ['self-thumbnail', self?.id],
     enabled: !!self?.id,
-    staleTime: 300_000, // 5 min — signed URL is good for 15 min
+    staleTime: 300_000,
     queryFn: async () => {
       const { data: images } = await supabase
         .from('face_images')
-        .select('id, storage_path')
+        .select('storage_path')
         .eq('person_id', self!.id)
         .eq('angle', 'front')
         .order('created_at', { ascending: false })
         .limit(1);
 
-      const imgRow = images?.[0];
-      if (!imgRow?.storage_path) return null;
+      const path = images?.[0]?.storage_path;
+      if (!path) return null;
 
-      // Fetch signed URL
       const { data } = await supabase.storage
         .from('face-images-raw')
-        .createSignedUrl(imgRow.storage_path, 900); // 15 min
-      if (!data?.signedUrl) return null;
-
-      // Fetch face landmarks to compute face-centred position
-      let facePosition = 'center 30%'; // sensible default for face photos
-      try {
-        const { data: landmarkRow } = await supabase
-          .from('face_landmarks')
-          .select('landmarks_json')
-          .eq('face_image_id', imgRow.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (landmarkRow?.landmarks_json) {
-          const json = landmarkRow.landmarks_json as {
-            landmarks?: Array<{ x: number; y: number }>;
-            bbox?: { x: number; y: number; w: number; h: number };
-          };
-
-          if (json.bbox) {
-            // Use bbox centre for positioning
-            const cx = (json.bbox.x + json.bbox.w / 2) * 100;
-            const cy = (json.bbox.y + json.bbox.h / 2) * 100;
-            facePosition = `${cx.toFixed(0)}% ${cy.toFixed(0)}%`;
-          } else if (json.landmarks?.length) {
-            // Compute face centre from all landmarks
-            const xs = json.landmarks.map(l => l.x);
-            const ys = json.landmarks.map(l => l.y);
-            const cx = ((Math.min(...xs) + Math.max(...xs)) / 2) * 100;
-            const cy = ((Math.min(...ys) + Math.max(...ys)) / 2) * 100;
-            facePosition = `${cx.toFixed(0)}% ${cy.toFixed(0)}%`;
-          }
-        }
-      } catch {
-        // Landmark fetch failed — use default position
-      }
-
-      return { url: data.signedUrl, facePosition };
+        .createSignedUrl(path, 900);
+      return data?.signedUrl ?? null;
     },
   });
 
-  const selfThumbnailUrl = selfThumbnailData?.url ?? null;
-  const selfFacePosition = selfThumbnailData?.facePosition ?? 'center 30%';
+  const selfFacePosition = 'center';
 
   const [analyzing, setAnalyzing]       = useState(false);
   const [analyzeError, setAnalyzeError] = useState('');
@@ -667,8 +625,7 @@ function FamilyMemberAvatar({ person }: { person: Person }) {
         <img
           src={thumbnailUrl}
           alt={person.display_name}
-          className="w-full h-full object-cover"
-          style={{ objectPosition: 'center 25%' }}
+          className="w-full h-full object-cover object-center"
         />
       ) : (
         <User size={22} className="text-muted-foreground" aria-hidden="true" />

@@ -70,8 +70,7 @@ export default function FaceSilhouette({ pins, activeFeature, onFeatureClick, se
           width="148" height="196"
           clipPath="url(#face-clip)"
           preserveAspectRatio="xMidYMid slice"
-          opacity="0.35"
-          style={{ filter: 'saturate(0.6)' }}
+          opacity="0.65"
         />
       )}
 

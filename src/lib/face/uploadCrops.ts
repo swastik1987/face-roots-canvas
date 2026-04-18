@@ -42,10 +42,9 @@ export async function cropAndUploadFeatures(
     return [];
   }
 
-  // Determine which features to crop based on angle
+  // Front-only capture: only crop front features.
+  void angle; // angle param retained for backward compatibility
   const features: FeatureType[] = [...FRONT_FEATURES];
-  if (angle === 'left') features.push('ear_left');
-  if (angle === 'right') features.push('ear_right');
 
   let crops;
   try {
