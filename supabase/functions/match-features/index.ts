@@ -8,10 +8,10 @@
  * all 3 angles, then finds the most similar family member embedding.
  * Writes top-1 winner + up to 4 runners-up into feature_matches.
  */
-import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
-import { getAdminClient } from '../_shared/supabaseAdmin.ts';
-import { captureException } from '../_shared/sentry.ts';
-import { MatchFeaturesInput } from '../_shared/schemas.ts';
+import { handleCors, jsonResponse, requireAuth } from "../_shared/cors.ts";
+import { getAdminClient } from "../_shared/supabaseAdmin.ts";
+import { captureException } from "../_shared/sentry.ts";
+import { MatchFeaturesInput } from "../_shared/schemas.ts";
 
 const TOP_N = 5; // winner + 4 runners-up
 
@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
   const cors = handleCors(req);
   if (cors) return cors;
 
-  let userId = 'unknown';
+  let userId = "unknown";
   try {
     const user = await requireAuth(req);
     userId = user.id;
@@ -31,69 +31,73 @@ Deno.serve(async (req) => {
 
     // Fetch the analysis and verify ownership
     const { data: analysis, error: analysisErr } = await db
-      .from('analyses')
-      .select('id, user_id, self_person_id')
-      .eq('id', analysis_id)
+      .from("analyses")
+      .select("id, user_id, self_person_id")
+      .eq("id", analysis_id)
       .single();
 
-    if (analysisErr || !analysis) return jsonResponse({ error: 'Analysis not found' }, 404);
-    if (analysis.user_id !== userId) return jsonResponse({ error: 'Forbidden' }, 403);
+    if (analysisErr || !analysis) return jsonResponse({ error: "Analysis not found" }, 404);
+    if (analysis.user_id !== userId) return jsonResponse({ error: "Forbidden" }, 403);
 
     // Get all family person IDs (not self)
     const { data: familyPersons } = await db
-      .from('persons')
-      .select('id')
-      .eq('owner_user_id', userId)
-      .eq('is_self', false);
+      .from("persons")
+      .select("id")
+      .eq("owner_user_id", userId)
+      .eq("is_self", false);
 
     if (!familyPersons || familyPersons.length === 0) {
-      return jsonResponse({ error: 'No family members with embeddings' }, 400);
+      return jsonResponse({ error: "No family members with embeddings" }, 400);
     }
 
-    const familyIds = familyPersons.map(p => p.id);
+    const familyIds = familyPersons.map((p) => p.id);
 
-    // Get all feature types the self has embeddings for
+    // Get all feature types the self has embeddings for from front images
     const { data: selfFeatureRows } = await db
-      .from('feature_embeddings')
-      .select('feature_type, embedding')
-      .eq('person_id', analysis.self_person_id);
+      .from("feature_embeddings")
+      .select("feature_type, embedding, face_images!inner(angle)")
+      .eq("person_id", analysis.self_person_id)
+      .eq("face_images.angle", "front");
 
     if (!selfFeatureRows || selfFeatureRows.length === 0) {
-      return jsonResponse({ error: 'No feature embeddings for self' }, 400);
+      return jsonResponse({ error: "No feature embeddings for self" }, 400);
     }
 
     console.log(`[match-features] Found ${selfFeatureRows.length} self feature rows`);
     // Log the raw shape of the first embedding to debug format issues
     const sampleEmb = selfFeatureRows[0].embedding;
-    console.log(`[match-features] Embedding type: ${typeof sampleEmb}, isArray: ${Array.isArray(sampleEmb)}, sample: ${String(sampleEmb).substring(0, 80)}`);
+    console.log(
+      `[match-features] Embedding type: ${typeof sampleEmb}, isArray: ${Array.isArray(sampleEmb)}, sample: ${String(sampleEmb).substring(0, 80)}`,
+    );
 
     // Group by feature_type → compute mean embedding per feature
     const featureMap = new Map<string, number[][]>();
     for (const row of selfFeatureRows) {
       const embValue = row.embedding;
       // Handle both string and array formats from pgvector
-      const parsed = typeof embValue === 'string'
-        ? parseVector(embValue)
-        : Array.isArray(embValue)
-          ? (embValue as number[])
-          : parseVector(String(embValue));
+      const parsed =
+        typeof embValue === "string"
+          ? parseVector(embValue)
+          : Array.isArray(embValue)
+            ? (embValue as number[])
+            : parseVector(String(embValue));
       if (!featureMap.has(row.feature_type)) featureMap.set(row.feature_type, []);
       featureMap.get(row.feature_type)!.push(parsed);
     }
 
-    console.log(`[match-features] Feature types: ${[...featureMap.keys()].join(', ')}`);
-    console.log(`[match-features] Family IDs: ${familyIds.join(', ')}`);
+    console.log(`[match-features] Feature types: ${[...featureMap.keys()].join(", ")}`);
+    console.log(`[match-features] Family IDs: ${familyIds.join(", ")}`);
 
     let matchesWritten = 0;
 
     for (const [featureType, embeddings] of featureMap) {
       const meanEmb = meanVector(embeddings);
-      const meanStr = `[${meanEmb.join(',')}]`;
+      const meanStr = `[${meanEmb.join(",")}]`;
 
       console.log(`[match-features] Querying ${featureType}: dim=${meanEmb.length}, familyIds=${familyIds.length}`);
 
       // Use pgvector RPC to find top-N family members by cosine similarity
-      const { data: matches, error: matchErr } = await db.rpc('match_feature_embeddings', {
+      const { data: matches, error: matchErr } = await db.rpc("match_feature_embeddings", {
         query_embedding: meanStr,
         feature_type_filter: featureType,
         family_person_ids: familyIds,
@@ -119,12 +123,11 @@ Deno.serve(async (req) => {
       // (tight cluster = high confidence winner is correct)
       const allSims = matches.map((m: { similarity: number }) => m.similarity);
       const meanSim = allSims.reduce((a: number, b: number) => a + b, 0) / allSims.length;
-      const variance =
-        allSims.reduce((a: number, b: number) => a + Math.pow(b - meanSim, 2), 0) / allSims.length;
+      const variance = allSims.reduce((a: number, b: number) => a + Math.pow(b - meanSim, 2), 0) / allSims.length;
       const winnerConfidence = Math.max(0, 1 - Math.sqrt(variance));
 
       // Upsert feature_match row
-      const { error: insertErr } = await db.from('feature_matches').upsert(
+      const { error: insertErr } = await db.from("feature_matches").upsert(
         {
           analysis_id,
           feature_type: featureType,
@@ -133,7 +136,7 @@ Deno.serve(async (req) => {
           winner_confidence: winnerConfidence,
           runners_up: runnersUp,
         },
-        { onConflict: 'analysis_id,feature_type' },
+        { onConflict: "analysis_id,feature_type" },
       );
 
       if (insertErr) {
@@ -145,7 +148,7 @@ Deno.serve(async (req) => {
 
     return jsonResponse({ matches_written: matchesWritten });
   } catch (err) {
-    await captureException(err, { functionName: 'match-features', userId });
+    await captureException(err, { functionName: "match-features", userId });
     const status = (err as Error & { status?: number }).status ?? 500;
     return jsonResponse({ error: (err as Error).message }, status);
   }
@@ -153,7 +156,10 @@ Deno.serve(async (req) => {
 
 /** Parse pgvector string "[0.1,0.2,...]" → number[] */
 function parseVector(vec: string): number[] {
-  return vec.replace(/^\[|\]$/g, '').split(',').map(Number);
+  return vec
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map(Number);
 }
 
 /** Compute element-wise mean across a list of same-length vectors. */
@@ -163,5 +169,5 @@ function meanVector(vecs: number[][]): number[] {
   for (const v of vecs) {
     for (let i = 0; i < dim; i++) sum[i] += v[i];
   }
-  return sum.map(x => x / vecs.length);
+  return sum.map((x) => x / vecs.length);
 }

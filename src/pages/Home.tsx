@@ -7,8 +7,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { captureEvent } from "@/lib/analytics";
-import { ensureAllCropsUploaded } from "@/lib/face/uploadCrops";
+import { ensureAllCropsUploaded, cropAndUploadFeatures } from "@/lib/face/uploadCrops";
 import { normalizeToPortrait } from "@/lib/face/normalize";
+import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 import PhotoEditSheet from "@/components/PhotoEditSheet";
 import FaceCropDialog from "@/components/FaceCropDialog";
 import type { Person } from "@/lib/supabase";
@@ -247,6 +248,47 @@ const Home = () => {
           .select("id")
           .single();
         if (insertError) throw insertError;
+
+        // Detect landmarks directly on the final normalized crop blob
+        await initDetector();
+        await setRunningMode("IMAGE");
+        const croppedImgForDetect = new Image();
+        croppedImgForDetect.src = URL.createObjectURL(normalizedBlob);
+        await new Promise<void>((resolve, reject) => {
+          croppedImgForDetect.onload = () => resolve();
+          croppedImgForDetect.onerror = () => reject(new Error("Failed to load cropped image for detection"));
+        });
+
+        const finalDetectionResult = detectImage(croppedImgForDetect);
+        const finalLandmarks = finalDetectionResult.faceLandmarks?.[0] ?? [];
+        const finalMatrices = finalDetectionResult.facialTransformationMatrixes?.[0]?.data
+          ? Array.from(finalDetectionResult.facialTransformationMatrixes[0].data)
+          : null;
+
+        // Store face_landmarks
+        await supabase.from("face_landmarks").insert({
+          face_image_id: inserted.id,
+          landmarks_json: {
+            landmarks: finalLandmarks,
+            matrix: finalMatrices,
+            bbox: { x: 0, y: 0, w: 1, h: 1 },
+          },
+        });
+
+        // Update face confidence to reflect if we found a face
+        if (finalLandmarks.length === 0) {
+          await supabase.from("face_images").update({ face_confidence: 0 }).eq("id", inserted.id);
+        }
+
+        // Crop features client-side
+        if (finalLandmarks.length > 0) {
+          try {
+            await cropAndUploadFeatures(cropPersonId, inserted.id, croppedImgForDetect, finalDetectionResult, "front");
+          } catch (cropErr) {
+            console.warn("[Home edit crop] Feature crop upload failed:", cropErr);
+          }
+        }
+        URL.revokeObjectURL(croppedImgForDetect.src);
 
         // Remove older front images so analysis and UI always use the newest portrait.
         const oldFrontImages = (previousFrontImages ?? []).filter((img) => img.id !== inserted.id);

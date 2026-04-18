@@ -223,17 +223,31 @@ const FamilyAdd = () => {
         .single();
       if (pe) throw pe;
 
-      // Normalize to portrait ratio before upload to keep stored photos consistent.
+      // 1. Detect landmarks directly on the final normalized crop blob
       const normalizedCropBlob = await normalizeToPortrait(cropBlob);
+      await initDetector();
+      await setRunningMode("IMAGE");
+      const croppedImgForDetect = new Image();
+      croppedImgForDetect.src = URL.createObjectURL(normalizedCropBlob);
+      await new Promise<void>((resolve, reject) => {
+        croppedImgForDetect.onload = () => resolve();
+        croppedImgForDetect.onerror = () => reject(new Error("Failed to load cropped image for detection"));
+      });
 
-      // Upload the cropped face image
+      const finalDetectionResult = detectImage(croppedImgForDetect);
+      const finalLandmarks = finalDetectionResult.faceLandmarks?.[0] ?? [];
+      const finalMatrices = finalDetectionResult.facialTransformationMatrixes?.[0]?.data
+        ? Array.from(finalDetectionResult.facialTransformationMatrixes[0].data)
+        : null;
+
+      // 2. Upload the cropped face image
       const path = `${user.id}/family/${person.id}_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
         .from("face-images-raw")
         .upload(path, normalizedCropBlob, { contentType: "image/jpeg" });
       if (se) throw se;
 
-      // face_images row
+      // 3. face_images row
       const { data: imgRow, error: ie } = await supabase
         .from("face_images")
         .insert({
@@ -241,50 +255,31 @@ const FamilyAdd = () => {
           storage_path: path,
           angle: "front",
           capture_method: "upload_cropped",
-          face_confidence: 1,
+          face_confidence: finalLandmarks.length > 0 ? 1 : 0,
         })
         .select("id")
         .single();
       if (ie) throw ie;
 
-      // face_landmarks — store bbox + landmark count for Phase 3 re-use
-      const lms = detectionResult?.faceLandmarks?.[0];
-      const transformedLandmarks = lms && bboxPercent ? transformLandmarksToCrop(lms, bboxPercent) : [];
-      const matrices = detectionResult?.facialTransformationMatrixes;
-      const matrixArr = matrices?.[0]?.data ? Array.from(matrices[0].data) : null;
+      // 4. face_landmarks — store accurate bbox + landmarks
       await supabase.from("face_landmarks").insert({
         face_image_id: imgRow.id,
         landmarks_json: {
-          landmarks: transformedLandmarks,
-          matrix: matrixArr,
+          landmarks: finalLandmarks,
+          matrix: finalMatrices,
           bbox: { x: 0, y: 0, w: 1, h: 1 },
         },
       });
 
-      // Crop features client-side and upload to feature-crops bucket using the
-      // SAME stored face crop + transformed landmarks coordinate space.
-      if (cropUrl && transformedLandmarks.length > 0) {
+      // 5. Crop features client-side
+      if (finalLandmarks.length > 0) {
         try {
-          const croppedImg = new Image();
-          croppedImg.src = cropUrl;
-          await new Promise<void>((resolve, reject) => {
-            croppedImg.onload = () => resolve();
-            croppedImg.onerror = () => reject(new Error("Failed to load cropped image"));
-          });
-
-          const transformedResult: FaceLandmarkerResult = {
-            faceLandmarks: [
-              transformedLandmarks.map((l) => ({ x: l.x, y: l.y, z: l.z ?? 0, visibility: l.visibility })),
-            ],
-            faceBlendshapes: detectionResult?.faceBlendshapes ?? [],
-            facialTransformationMatrixes: detectionResult?.facialTransformationMatrixes ?? [],
-          };
-
-          await cropAndUploadFeatures(person.id, imgRow.id, croppedImg, transformedResult, "front");
+          await cropAndUploadFeatures(person.id, imgRow.id, croppedImgForDetect, finalDetectionResult, "front");
         } catch (cropErr) {
           console.warn("[FamilyAdd] Feature crop upload failed:", cropErr);
         }
       }
+      URL.revokeObjectURL(croppedImgForDetect.src);
 
       // Invalidate persons cache so Home re-fetches immediately
       await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });

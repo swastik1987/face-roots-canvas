@@ -11,11 +11,11 @@
  * The userId prefix is required by the bucket's RLS policy.
  */
 
-import { supabase } from '@/lib/supabase';
-import { cropFeatures } from './cropper';
-import { FRONT_FEATURES, SIDE_FEATURES, type FeatureType } from './regions';
-import { embedImage, CLIP_MODEL_VERSION, EMBEDDING_DIM } from './embedder';
-import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
+import { supabase } from "@/lib/supabase";
+import { cropFeatures } from "./cropper";
+import { FRONT_FEATURES, SIDE_FEATURES, type FeatureType } from "./regions";
+import { embedImage, CLIP_MODEL_VERSION, EMBEDDING_DIM } from "./embedder";
+import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 
 /**
  * Crop all detectable features from a face image and upload them to the
@@ -33,12 +33,14 @@ export async function cropAndUploadFeatures(
   faceImageId: string,
   source: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
   landmarkResult: FaceLandmarkerResult,
-  angle: 'front' | 'left' | 'right' | 'unknown' = 'front',
+  angle: "front" | "left" | "right" | "unknown" = "front",
 ): Promise<Array<{ feature_type: string; storage_path: string }>> {
   // Get current user ID — needed for storage path (RLS requires uid as first segment)
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) {
-    console.warn('[uploadCrops] No authenticated user — cannot upload crops');
+    console.warn("[uploadCrops] No authenticated user — cannot upload crops");
     return [];
   }
 
@@ -50,12 +52,12 @@ export async function cropAndUploadFeatures(
   try {
     crops = await cropFeatures(landmarkResult, source, features);
   } catch (err) {
-    console.warn('[uploadCrops] cropFeatures failed:', err);
+    console.warn("[uploadCrops] cropFeatures failed:", err);
     return [];
   }
 
   if (!crops.length) {
-    console.warn('[uploadCrops] No crops produced');
+    console.warn("[uploadCrops] No crops produced");
     return [];
   }
 
@@ -69,8 +71,8 @@ export async function cropAndUploadFeatures(
 
     try {
       const { error } = await supabase.storage
-        .from('feature-crops')
-        .upload(cropPath, crop.blob, { contentType: 'image/png', upsert: true });
+        .from("feature-crops")
+        .upload(cropPath, crop.blob, { contentType: "image/png", upsert: true });
 
       if (error) {
         console.warn(`[uploadCrops] Upload failed for ${cropPath}:`, error.message);
@@ -108,7 +110,7 @@ export function loadImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error('Failed to load image from blob'));
+      reject(new Error("Failed to load image from blob"));
     };
     img.src = url;
   });
@@ -118,7 +120,7 @@ export function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement>
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Failed to load image from data URL'));
+    img.onerror = () => reject(new Error("Failed to load image from data URL"));
     img.src = dataUrl;
   });
 }
@@ -135,29 +137,27 @@ export function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement>
  * @param onProgress  Optional callback for UI feedback
  * @returns Number of images that had embeddings generated
  */
-export async function ensureAllCropsUploaded(
-  onProgress?: (done: number, total: number) => void,
-): Promise<number> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function ensureAllCropsUploaded(onProgress?: (done: number, total: number) => void): Promise<number> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) {
-    console.warn('[backfill] No authenticated user');
+    console.warn("[backfill] No authenticated user");
     return 0;
   }
 
   // Fetch all this user's persons
-  const { data: persons } = await supabase
-    .from('persons')
-    .select('id')
-    .eq('owner_user_id', user.id);
+  const { data: persons } = await supabase.from("persons").select("id").eq("owner_user_id", user.id);
 
   if (!persons?.length) return 0;
 
   // Fetch all face images
-  const personIds = persons.map(p => p.id);
+  const personIds = persons.map((p) => p.id);
   const { data: images } = await supabase
-    .from('face_images')
-    .select('id, person_id, storage_path, angle')
-    .in('person_id', personIds);
+    .from("face_images")
+    .select("id, person_id, storage_path, angle")
+    .eq("angle", "front")
+    .in("person_id", personIds);
 
   if (!images?.length) return 0;
 
@@ -169,9 +169,9 @@ export async function ensureAllCropsUploaded(
 
     // Check if this image already has enough embeddings in DB
     const { count: embCount } = await supabase
-      .from('feature_embeddings')
-      .select('*', { count: 'exact', head: true })
-      .eq('face_image_id', img.id);
+      .from("feature_embeddings")
+      .select("*", { count: "exact", head: true })
+      .eq("face_image_id", img.id);
 
     if (embCount && embCount >= 8) {
       // Already has embeddings — skip entirely
@@ -181,26 +181,24 @@ export async function ensureAllCropsUploaded(
 
     // Check if crops exist in storage
     const cropPrefix = `${user.id}/${img.person_id}/${img.id}`;
-    const { data: existing } = await supabase.storage
-      .from('feature-crops')
-      .list(cropPrefix);
+    const { data: existing } = await supabase.storage.from("feature-crops").list(cropPrefix);
 
-    const existingPngs = (existing ?? []).filter(f => f.name.endsWith('.png'));
+    const existingPngs = (existing ?? []).filter((f) => f.name.endsWith(".png"));
     let uploadedCrops: Array<{ feature_type: string; storage_path: string }> = [];
 
     if (existingPngs.length >= 8) {
       // Crops exist but embeddings don't — build crop list from storage
-      uploadedCrops = existingPngs.map(f => ({
-        feature_type: f.name.replace('.png', ''),
+      uploadedCrops = existingPngs.map((f) => ({
+        feature_type: f.name.replace(".png", ""),
         storage_path: `${cropPrefix}/${f.name}`,
       }));
     } else {
       // Need to generate crops from landmarks
       const { data: lmRow } = await supabase
-        .from('face_landmarks')
-        .select('landmarks_json')
-        .eq('face_image_id', img.id)
-        .order('created_at', { ascending: false })
+        .from("face_landmarks")
+        .select("landmarks_json")
+        .eq("face_image_id", img.id)
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -222,7 +220,7 @@ export async function ensureAllCropsUploaded(
 
       // Download the face image from storage
       const { data: signedData } = await supabase.storage
-        .from('face-images-raw')
+        .from("face-images-raw")
         .createSignedUrl(img.storage_path, 300);
 
       if (!signedData?.signedUrl) {
@@ -242,26 +240,22 @@ export async function ensureAllCropsUploaded(
 
       // Reconstruct FaceLandmarkerResult from stored landmarks
       const mockResult: FaceLandmarkerResult = {
-        faceLandmarks: [stored.landmarks.map(lm => ({
-          x: lm.x,
-          y: lm.y,
-          z: lm.z ?? 0,
-          visibility: lm.visibility ?? 0,
-        }))],
+        faceLandmarks: [
+          stored.landmarks.map((lm) => ({
+            x: lm.x,
+            y: lm.y,
+            z: lm.z ?? 0,
+            visibility: lm.visibility ?? 0,
+          })),
+        ],
         faceBlendshapes: [],
         facialTransformationMatrixes: [],
       };
 
-      const angle = (img.angle as 'front' | 'left' | 'right') || 'front';
+      const angle = (img.angle as "front" | "left" | "right") || "front";
 
       try {
-        uploadedCrops = await cropAndUploadFeatures(
-          img.person_id,
-          img.id,
-          imgEl,
-          mockResult,
-          angle,
-        );
+        uploadedCrops = await cropAndUploadFeatures(img.person_id, img.id, imgEl, mockResult, angle);
         console.log(`[backfill] Image ${img.id}: uploaded ${uploadedCrops.length} crops`);
       } catch (err) {
         console.warn(`[backfill] Crop failed for image ${img.id}:`, err);
@@ -279,10 +273,10 @@ export async function ensureAllCropsUploaded(
         try {
           // Check if this specific embedding already exists
           const { data: existingEmb } = await supabase
-            .from('feature_embeddings')
-            .select('id')
-            .eq('face_image_id', img.id)
-            .eq('feature_type', crop.feature_type)
+            .from("feature_embeddings")
+            .select("id")
+            .eq("face_image_id", img.id)
+            .eq("feature_type", crop.feature_type)
             .maybeSingle();
 
           if (existingEmb) {
@@ -291,9 +285,7 @@ export async function ensureAllCropsUploaded(
           }
 
           // Download the crop from storage to get the blob
-          const { data: cropBlob } = await supabase.storage
-            .from('feature-crops')
-            .download(crop.storage_path);
+          const { data: cropBlob } = await supabase.storage.from("feature-crops").download(crop.storage_path);
 
           if (!cropBlob) {
             console.warn(`[backfill] Could not download crop ${crop.storage_path}`);
@@ -304,16 +296,14 @@ export async function ensureAllCropsUploaded(
           const embedding = await embedImage(cropBlob);
 
           // Insert directly into feature_embeddings
-          const { error: insertErr } = await supabase
-            .from('feature_embeddings')
-            .insert({
-              person_id: img.person_id,
-              face_image_id: img.id,
-              feature_type: crop.feature_type,
-              crop_storage_path: crop.storage_path,
-              embedding: `[${embedding.join(',')}]`,
-              model_version: CLIP_MODEL_VERSION,
-            });
+          const { error: insertErr } = await supabase.from("feature_embeddings").insert({
+            person_id: img.person_id,
+            face_image_id: img.id,
+            feature_type: crop.feature_type,
+            crop_storage_path: crop.storage_path,
+            embedding: `[${embedding.join(",")}]`,
+            model_version: CLIP_MODEL_VERSION,
+          });
 
           if (insertErr) {
             console.warn(`[backfill] Insert failed for ${crop.feature_type}:`, insertErr.message);
@@ -340,9 +330,9 @@ export async function ensureAllCropsUploaded(
 function loadImageFromSignedUrl(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous'; // needed for Canvas to read pixels
+    img.crossOrigin = "anonymous"; // needed for Canvas to read pixels
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Failed to load image from URL'));
+    img.onerror = () => reject(new Error("Failed to load image from URL"));
     img.src = url;
   });
 }
