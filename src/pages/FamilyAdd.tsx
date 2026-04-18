@@ -12,50 +12,48 @@
  *   done:      success screen
  */
 
-import { useRef, useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw } from 'lucide-react';
-import { initDetector, setRunningMode, detectImage } from '@/lib/face/detector';
-import { cropAndUploadFeatures } from '@/lib/face/uploadCrops';
-import { normalizeToPortrait } from '@/lib/face/normalize';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
-import type { FaceLandmarkerResult } from '@mediapipe/tasks-vision';
+import { useRef, useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { motion, AnimatePresence } from "framer-motion";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw } from "lucide-react";
+import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
+import { cropAndUploadFeatures } from "@/lib/face/uploadCrops";
+import { normalizeToPortrait } from "@/lib/face/normalize";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
+import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 
-const spring = { type: 'spring' as const, stiffness: 260, damping: 20 };
+const spring = { type: "spring" as const, stiffness: 260, damping: 20 };
 
 const RELATIONSHIP_OPTIONS = [
-  { label: 'Mother',           tag: 'mother',            generation: 1 },
-  { label: 'Father',           tag: 'father',            generation: 1 },
-  { label: 'Maternal Grandma', tag: 'maternal_grandma',  generation: 2 },
-  { label: 'Maternal Grandpa', tag: 'maternal_grandpa',  generation: 2 },
-  { label: 'Paternal Grandma', tag: 'paternal_grandma',  generation: 2 },
-  { label: 'Paternal Grandpa', tag: 'paternal_grandpa',  generation: 2 },
-  { label: 'Sibling',          tag: 'sibling',           generation: 0 },
-  { label: 'Uncle',            tag: 'uncle',             generation: 1 },
-  { label: 'Aunt',             tag: 'aunt',              generation: 1 },
-  { label: 'Child',            tag: 'child',             generation: -1 },
-  { label: 'Other',            tag: 'other',             generation: 0 },
+  { label: "Mother", tag: "mother", generation: 1 },
+  { label: "Father", tag: "father", generation: 1 },
+  { label: "Maternal Grandma", tag: "maternal_grandma", generation: 2 },
+  { label: "Maternal Grandpa", tag: "maternal_grandpa", generation: 2 },
+  { label: "Paternal Grandma", tag: "paternal_grandma", generation: 2 },
+  { label: "Paternal Grandpa", tag: "paternal_grandpa", generation: 2 },
+  { label: "Sibling", tag: "sibling", generation: 0 },
+  { label: "Uncle", tag: "uncle", generation: 1 },
+  { label: "Aunt", tag: "aunt", generation: 1 },
+  { label: "Child", tag: "child", generation: -1 },
+  { label: "Other", tag: "other", generation: 0 },
 ];
 
-type Phase = 'pick' | 'detecting' | 'crop' | 'confirm' | 'saving' | 'done' | 'error';
+type Phase = "pick" | "detecting" | "crop" | "confirm" | "saving" | "done" | "error";
 
 // ── Face crop helper ──────────────────────────────────────────────────────────
 
 /** Compute face bbox (normalised 0-1) from all landmarks, then pad by pct. */
 function getBbox(
   landmarks: Array<{ x: number; y: number; z: number }>,
-  pad = 0.20,
+  pad = 0.2,
 ): { x: number; y: number; w: number; h: number } {
-  const xs = landmarks.map(l => l.x);
-  const ys = landmarks.map(l => l.y);
+  const xs = landmarks.map((l) => l.x);
+  const ys = landmarks.map((l) => l.y);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
@@ -87,10 +85,10 @@ async function cropFaceBlob(
   bbox: { x: number; y: number; w: number; h: number },
   outputSize = 512,
 ): Promise<{ blob: Blob; dataUrl: string }> {
-  const canvas = document.createElement('canvas');
-  canvas.width  = outputSize;
+  const canvas = document.createElement("canvas");
+  canvas.width = outputSize;
   canvas.height = outputSize;
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext("2d")!;
 
   const sx = bbox.x * img.naturalWidth;
   const sy = bbox.y * img.naturalHeight;
@@ -99,31 +97,29 @@ async function cropFaceBlob(
 
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outputSize, outputSize);
 
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  const blob = await new Promise<Blob>(resolve =>
-    canvas.toBlob(b => resolve(b!), 'image/jpeg', 0.92),
-  );
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+  const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.92));
   return { blob, dataUrl };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const FamilyAdd = () => {
-  const navigate   = useNavigate();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user }   = useAuth();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [phase, setPhase]         = useState<Phase>('pick');
-  const [errorMsg, setErrorMsg]   = useState('');
-  const [previewUrl, setPreviewUrl] = useState('');   // full image object URL
-  const [cropUrl, setCropUrl]     = useState('');     // cropped face data URL
-  const [cropBlob, setCropBlob]   = useState<Blob | null>(null);
+  const [phase, setPhase] = useState<Phase>("pick");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [previewUrl, setPreviewUrl] = useState(""); // full image object URL
+  const [cropUrl, setCropUrl] = useState(""); // cropped face data URL
+  const [cropBlob, setCropBlob] = useState<Blob | null>(null);
   const [detectionResult, setDetectionResult] = useState<FaceLandmarkerResult | null>(null);
   const [bboxPercent, setBboxPercent] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [name, setName]           = useState('');
-  const [relationTag, setRelationTag] = useState(searchParams.get('tag') ?? '');
+  const [name, setName] = useState("");
+  const [relationTag, setRelationTag] = useState(searchParams.get("tag") ?? "");
 
   // Cleanup object URLs on unmount
   useEffect(() => {
@@ -135,47 +131,47 @@ const FamilyAdd = () => {
   // ── File pick + detection ──────────────────────────────────────────────────
 
   const handleFile = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setErrorMsg('Please select an image file.');
-      setPhase('error');
+    if (!file.type.startsWith("image/")) {
+      setErrorMsg("Please select an image file.");
+      setPhase("error");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      setErrorMsg('Image must be smaller than 10 MB.');
-      setPhase('error');
+      setErrorMsg("Image must be smaller than 10 MB.");
+      setPhase("error");
       return;
     }
 
-    setPhase('detecting');
-    setErrorMsg('');
+    setPhase("detecting");
+    setErrorMsg("");
 
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
 
     try {
       await initDetector();
-      await setRunningMode('IMAGE');
+      await setRunningMode("IMAGE");
 
       const img = new Image();
       img.src = url;
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
-        img.onerror = () => reject(new Error('Image failed to load'));
+        img.onerror = () => reject(new Error("Image failed to load"));
       });
       const result = detectImage(img);
       const numFaces = result.faceLandmarks?.length ?? 0;
 
       if (numFaces === 0) {
-        setErrorMsg('No face found in this photo. Please try a clearer front-facing portrait.');
-        setPhase('error');
+        setErrorMsg("No face found in this photo. Please try a clearer front-facing portrait.");
+        setPhase("error");
         URL.revokeObjectURL(url);
-        setPreviewUrl('');
+        setPreviewUrl("");
         return;
       }
 
       // Compute face bbox and crop
       const landmarks = result.faceLandmarks[0];
-      const bbox = getBbox(landmarks, 0.20);
+      const bbox = getBbox(landmarks, 0.2);
       setBboxPercent(bbox);
       setDetectionResult(result);
 
@@ -183,11 +179,11 @@ const FamilyAdd = () => {
       setCropBlob(blob);
       setCropUrl(dataUrl);
 
-      setPhase('crop');
+      setPhase("crop");
     } catch (err) {
-      console.error('Detection error', err);
-      setErrorMsg('Could not analyse the photo. Please try another image.');
-      setPhase('error');
+      console.error("Detection error", err);
+      setErrorMsg("Could not analyse the photo. Please try another image.");
+      setPhase("error");
     }
   };
 
@@ -195,27 +191,33 @@ const FamilyAdd = () => {
 
   const handleSave = async () => {
     if (!user || !cropBlob) return;
-    if (!name.trim())   { setErrorMsg('Please enter a name.'); return; }
-    if (!relationTag)   { setErrorMsg('Please select a relationship.'); return; }
+    if (!name.trim()) {
+      setErrorMsg("Please enter a name.");
+      return;
+    }
+    if (!relationTag) {
+      setErrorMsg("Please select a relationship.");
+      return;
+    }
 
-    setPhase('saving');
-    setErrorMsg('');
+    setPhase("saving");
+    setErrorMsg("");
 
     try {
-      const rel = RELATIONSHIP_OPTIONS.find(r => r.tag === relationTag);
+      const rel = RELATIONSHIP_OPTIONS.find((r) => r.tag === relationTag);
       const generation = rel?.generation ?? 0;
 
       // Create person row
       const { data: person, error: pe } = await supabase
-        .from('persons')
+        .from("persons")
         .insert({
           owner_user_id: user.id,
-          display_name:  name.trim(),
+          display_name: name.trim(),
           relationship_tag: relationTag,
           generation,
           is_self: false,
         })
-        .select('id')
+        .select("id")
         .single();
       if (pe) throw pe;
 
@@ -225,31 +227,30 @@ const FamilyAdd = () => {
       // Upload the cropped face image
       const path = `${user.id}/family/${person.id}_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
-        .from('face-images-raw')
-        .upload(path, normalizedCropBlob, { contentType: 'image/jpeg' });
+        .from("face-images-raw")
+        .upload(path, normalizedCropBlob, { contentType: "image/jpeg" });
       if (se) throw se;
 
       // face_images row
       const { data: imgRow, error: ie } = await supabase
-        .from('face_images')
+        .from("face_images")
         .insert({
-          person_id:      person.id,
-          storage_path:   path,
-          angle:          'front',
-          capture_method: 'upload_cropped',
+          person_id: person.id,
+          storage_path: path,
+          angle: "front",
+          capture_method: "upload_cropped",
           face_confidence: 1,
         })
-        .select('id')
+        .select("id")
         .single();
       if (ie) throw ie;
 
       // face_landmarks — store bbox + landmark count for Phase 3 re-use
       const lms = detectionResult?.faceLandmarks?.[0];
-      const transformedLandmarks =
-        lms && bboxPercent ? transformLandmarksToCrop(lms, bboxPercent) : [];
+      const transformedLandmarks = lms && bboxPercent ? transformLandmarksToCrop(lms, bboxPercent) : [];
       const matrices = detectionResult?.facialTransformationMatrixes;
       const matrixArr = matrices?.[0]?.data ? Array.from(matrices[0].data) : null;
-      await supabase.from('face_landmarks').insert({
+      await supabase.from("face_landmarks").insert({
         face_image_id: imgRow.id,
         landmarks_json: {
           landmarks: transformedLandmarks,
@@ -266,71 +267,64 @@ const FamilyAdd = () => {
           croppedImg.src = cropUrl;
           await new Promise<void>((resolve, reject) => {
             croppedImg.onload = () => resolve();
-            croppedImg.onerror = () => reject(new Error('Failed to load cropped image'));
+            croppedImg.onerror = () => reject(new Error("Failed to load cropped image"));
           });
 
           const transformedResult: FaceLandmarkerResult = {
-            faceLandmarks: [transformedLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z ?? 0, visibility: l.visibility }))],
+            faceLandmarks: [
+              transformedLandmarks.map((l) => ({ x: l.x, y: l.y, z: l.z ?? 0, visibility: l.visibility })),
+            ],
             faceBlendshapes: detectionResult?.faceBlendshapes ?? [],
             facialTransformationMatrixes: detectionResult?.facialTransformationMatrixes ?? [],
           };
 
-          await cropAndUploadFeatures(
-            person.id,
-            imgRow.id,
-            croppedImg,
-            transformedResult,
-            'front',
-          );
+          await cropAndUploadFeatures(person.id, imgRow.id, croppedImg, transformedResult, "front");
         } catch (cropErr) {
-          console.warn('[FamilyAdd] Feature crop upload failed:', cropErr);
+          console.warn("[FamilyAdd] Feature crop upload failed:", cropErr);
         }
       }
 
       // Invalidate persons cache so Home re-fetches immediately
-      await queryClient.invalidateQueries({ queryKey: ['persons', user.id] });
+      await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });
 
-      setPhase('done');
+      setPhase("done");
     } catch (err) {
-      console.error('Save failed', err);
-      setErrorMsg('Failed to save. Please try again.');
-      setPhase('error');
+      console.error("Save failed", err);
+      setErrorMsg("Failed to save. Please try again.");
+      setPhase("error");
     }
   };
 
   const reset = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPhase('pick');
-    setPreviewUrl('');
-    setCropUrl('');
+    setPhase("pick");
+    setPreviewUrl("");
+    setCropUrl("");
     setCropBlob(null);
     setDetectionResult(null);
     setBboxPercent(null);
-    setErrorMsg('');
-    setName('');
-    setRelationTag('');
+    setErrorMsg("");
+    setName("");
+    setRelationTag("");
   };
 
   // ── Done ───────────────────────────────────────────────────────────────────
 
-  if (phase === 'done') {
+  if (phase === "done") {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-6">
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
-          transition={{ type: 'spring', stiffness: 260, damping: 18 }}
+          transition={{ type: "spring", stiffness: 260, damping: 18 }}
         >
           <CheckCircle2 size={64} className="text-cyan" />
         </motion.div>
         <h1 className="text-xl font-bold">{name} added!</h1>
-        <button className="btn-gradient px-8 py-3" onClick={() => navigate('/home')}>
+        <button className="btn-gradient px-8 py-3" onClick={() => navigate("/home")}>
           Back to family
         </button>
-        <button
-          className="text-sm text-muted-foreground underline underline-offset-2"
-          onClick={reset}
-        >
+        <button className="text-sm text-muted-foreground underline underline-offset-2" onClick={reset}>
           Add another
         </button>
       </div>
@@ -339,7 +333,7 @@ const FamilyAdd = () => {
 
   // ── Crop confirmation screen ───────────────────────────────────────────────
 
-  if (phase === 'crop') {
+  if (phase === "crop") {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 py-12 gap-6">
         <motion.div
@@ -367,9 +361,9 @@ const FamilyAdd = () => {
                   <div
                     className="absolute border-2 border-cyan"
                     style={{
-                      left:   `${bboxPercent.x * 100}%`,
-                      top:    `${bboxPercent.y * 100}%`,
-                      width:  `${bboxPercent.w * 100}%`,
+                      left: `${bboxPercent.x * 100}%`,
+                      top: `${bboxPercent.y * 100}%`,
+                      width: `${bboxPercent.w * 100}%`,
                       height: `${bboxPercent.h * 100}%`,
                     }}
                   />
@@ -380,19 +374,22 @@ const FamilyAdd = () => {
             {/* Cropped face */}
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground text-center">Face crop</p>
-              <div className="rounded-xl overflow-hidden bg-black aspect-square">
+              <div className="rounded-xl overflow-hidden bg-black aspect-[3/4] flex items-center justify-center relative">
                 {cropUrl && (
-                  <img src={cropUrl} alt="Face crop" className="w-full h-full object-cover" />
+                  <>
+                    <img src={cropUrl} alt="Face crop" className="w-full h-full object-cover" />
+                    <div
+                      className="absolute inset-0 pointer-events-none border-2 border-cyan/70 mask-oval"
+                      style={{ borderRadius: "50% / 50%" }}
+                    />
+                  </>
                 )}
               </div>
             </div>
           </div>
 
           <div className="flex flex-col gap-2">
-            <button
-              className="btn-gradient w-full py-3 text-sm font-medium"
-              onClick={() => setPhase('confirm')}
-            >
+            <button className="btn-gradient w-full py-3 text-sm font-medium" onClick={() => setPhase("confirm")}>
               Looks good — continue
             </button>
             <button
@@ -422,7 +419,7 @@ const FamilyAdd = () => {
 
         {/* Photo picker / preview */}
         <AnimatePresence mode="wait">
-          {phase === 'pick' || phase === 'error' ? (
+          {phase === "pick" || phase === "error" ? (
             <motion.button
               key="picker"
               className="w-full h-40 rounded-xl border-2 border-dashed border-white/20 flex flex-col items-center justify-center gap-2 hover:bg-white/5 transition-colors"
@@ -439,13 +436,14 @@ const FamilyAdd = () => {
               animate={{ opacity: 1 }}
             >
               {/* Confirm phase: show crop preview */}
-              {(phase === 'confirm' || phase === 'saving') && cropUrl ? (
+              {(phase === "confirm" || phase === "saving") && cropUrl ? (
                 <div className="flex gap-3 items-center">
-                  <img
-                    src={cropUrl}
-                    alt="Face crop"
-                    className="w-20 h-20 rounded-xl object-cover border border-cyan/30"
-                  />
+                  <div
+                    className="w-20 h-28 relative rounded-full overflow-hidden border border-cyan/30"
+                    style={{ borderRadius: "50% / 50%" }}
+                  >
+                    <img src={cropUrl} alt="Face crop" className="w-full h-full object-cover" />
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     <p className="text-foreground font-medium text-sm mb-0.5">Face confirmed</p>
                     <p>Fill in the details to save this family member.</p>
@@ -454,7 +452,7 @@ const FamilyAdd = () => {
               ) : (
                 <div className="w-full h-40 relative">
                   <img src={previewUrl} alt="Preview" className="w-full h-full object-cover rounded-xl" />
-                  {phase === 'detecting' && (
+                  {phase === "detecting" && (
                     <div className="absolute inset-0 bg-black/50 rounded-xl flex items-center justify-center gap-2">
                       <Loader2 size={20} className="animate-spin text-white" />
                       <span className="text-white text-sm">Detecting face…</span>
@@ -471,10 +469,14 @@ const FamilyAdd = () => {
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFile(f);
+            e.target.value = "";
+          }}
         />
 
-        {phase === 'error' && errorMsg && (
+        {phase === "error" && errorMsg && (
           <div className="flex items-start gap-2 text-destructive text-xs">
             <AlertCircle size={14} className="mt-0.5 shrink-0" />
             <span>{errorMsg}</span>
@@ -482,7 +484,7 @@ const FamilyAdd = () => {
         )}
 
         {/* Name + relationship — only shown in confirm/saving */}
-        {(phase === 'confirm' || phase === 'saving') && (
+        {(phase === "confirm" || phase === "saving") && (
           <>
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
@@ -491,43 +493,43 @@ const FamilyAdd = () => {
                 placeholder="e.g. Maria"
                 className="bg-white/5 border-white/10"
                 value={name}
-                onChange={e => setName(e.target.value)}
-                disabled={phase === 'saving'}
+                onChange={(e) => setName(e.target.value)}
+                disabled={phase === "saving"}
                 autoFocus
               />
             </div>
 
             <div className="space-y-2">
               <Label>Relationship</Label>
-              <Select value={relationTag} onValueChange={setRelationTag} disabled={phase === 'saving'}>
+              <Select value={relationTag} onValueChange={setRelationTag} disabled={phase === "saving"}>
                 <SelectTrigger className="bg-white/5 border-white/10">
                   <SelectValue placeholder="Select relationship" />
                 </SelectTrigger>
                 <SelectContent>
-                  {RELATIONSHIP_OPTIONS.map(r => (
-                    <SelectItem key={r.tag} value={r.tag}>{r.label}</SelectItem>
+                  {RELATIONSHIP_OPTIONS.map((r) => (
+                    <SelectItem key={r.tag} value={r.tag}>
+                      {r.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            {errorMsg && (
-              <p className="text-xs text-destructive">{errorMsg}</p>
-            )}
+            {errorMsg && <p className="text-xs text-destructive">{errorMsg}</p>}
 
             <div className="flex flex-col gap-2">
               <button
                 className="btn-gradient w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
                 onClick={handleSave}
-                disabled={phase === 'saving'}
+                disabled={phase === "saving"}
               >
-                {phase === 'saving' && <Loader2 size={16} className="animate-spin" />}
+                {phase === "saving" && <Loader2 size={16} className="animate-spin" />}
                 Save family member
               </button>
               <button
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
                 onClick={reset}
-                disabled={phase === 'saving'}
+                disabled={phase === "saving"}
               >
                 ← Start over
               </button>
@@ -536,7 +538,7 @@ const FamilyAdd = () => {
         )}
 
         {/* Re-pick after error */}
-        {phase === 'error' && (
+        {phase === "error" && (
           <button
             className="w-full py-3 rounded-full border border-white/10 text-sm text-muted-foreground hover:bg-white/5 transition-colors"
             onClick={reset}
