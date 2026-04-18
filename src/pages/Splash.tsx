@@ -1,32 +1,32 @@
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { ScanFace, Sparkles, Share2, ArrowRight, GitCompare } from 'lucide-react';
-import Wordmark from '@/components/brand/Wordmark';
+import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
+import { ScanFace, Sparkles, Share2, ArrowRight, GitCompare } from "lucide-react";
+import Wordmark from "@/components/brand/Wordmark";
 
-const spring = { type: 'spring' as const, stiffness: 260, damping: 22 };
+const spring = { type: "spring" as const, stiffness: 260, damping: 22 };
 
 const STEPS = [
   {
     icon: ScanFace,
-    title: 'Capture your face',
-    desc: 'Take 3 quick angles with your camera. We detect 478 facial landmarks automatically.',
+    title: "Capture your face",
+    desc: "Take a quick portrait photo with your camera. We detect 478 facial landmarks automatically.",
   },
   {
     icon: GitCompare,
-    title: 'Add family members',
-    desc: 'Upload photos of parents, grandparents, siblings — anyone you want to compare against.',
+    title: "Add family members",
+    desc: "Upload photos of parents, grandparents, siblings — anyone you want to compare against.",
   },
   {
     icon: Sparkles,
-    title: 'Discover your DNA map',
-    desc: 'See exactly which facial features you inherited from which relative, feature by feature.',
+    title: "Discover your DNA map",
+    desc: "See exactly which facial features you inherited from which relative, feature by feature.",
   },
 ];
 
 const FEATURES = [
-  { stat: '478', label: 'landmarks tracked per face' },
-  { stat: '12',  label: 'facial features analysed' },
-  { stat: '100%', label: 'private — stays on your device' },
+  { stat: "478", label: "landmarks tracked per face" },
+  { stat: "12", label: "facial features analysed" },
+  { stat: "100%", label: "private — stays on your device" },
 ];
 
 const Splash = () => {
@@ -34,7 +34,6 @@ const Splash = () => {
 
   return (
     <div className="flex flex-col min-h-screen overflow-x-hidden">
-
       {/* ── Hero ────────────────────────────────────────────────────────────── */}
       <section className="relative flex flex-col items-center justify-center min-h-screen px-6 text-center gap-6 radial-glow overflow-hidden">
         {/* background circles */}
@@ -48,9 +47,7 @@ const Splash = () => {
           transition={spring}
         >
           <Wordmark />
-          <p className="text-base font-semibold text-fuchsia-400 tracking-wide mt-1">
-            Now you know who to blame.
-          </p>
+          <p className="text-base font-semibold text-fuchsia-400 tracking-wide mt-1">Now you know who to blame.</p>
         </motion.div>
 
         <motion.p
@@ -59,8 +56,8 @@ const Splash = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...spring, delay: 0.12 }}
         >
-          Upload family portraits and discover which facial features you inherited — and exactly
-          which relative to credit (or blame).
+          Upload family portraits and discover which facial features you inherited — and exactly which relative to
+          credit (or blame).
         </motion.p>
 
         <motion.div
@@ -71,7 +68,7 @@ const Splash = () => {
         >
           <motion.button
             className="btn-gradient px-8 py-3.5 text-base font-semibold flex items-center gap-2"
-            onClick={() => navigate('/auth')}
+            onClick={() => navigate("/auth")}
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.97 }}
           >
@@ -86,7 +83,7 @@ const Splash = () => {
           animate={{ opacity: 1 }}
           transition={{ delay: 0.4 }}
         >
-          {FEATURES.map(f => (
+          {FEATURES.map((f) => (
             <div key={f.stat} className="flex flex-col items-center gap-0.5">
               <span className="text-xl font-bold gradient-text">{f.stat}</span>
               <span className="text-xs text-muted-foreground text-center leading-tight max-w-[72px]">{f.label}</span>
@@ -104,7 +101,7 @@ const Splash = () => {
           <motion.div
             className="w-0.5 h-8 bg-gradient-to-b from-white/20 to-transparent rounded-full"
             animate={{ scaleY: [1, 0.4, 1] }}
-            transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+            transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
           />
           <span className="text-xs">scroll</span>
         </motion.div>
@@ -169,9 +166,9 @@ const Splash = () => {
         {/* Mock result cards */}
         <div className="w-full max-w-sm space-y-3">
           {[
-            { feature: 'Nose',    person: 'Dad',    pct: 87, color: 'from-cyan to-blue-400' },
-            { feature: 'Eyes',    person: 'Mum',    pct: 79, color: 'from-fuchsia-500 to-purple-500' },
-            { feature: 'Jawline', person: 'Grandpa', pct: 72, color: 'from-amber-400 to-orange-500' },
+            { feature: "Nose", person: "Dad", pct: 87, color: "from-cyan to-blue-400" },
+            { feature: "Eyes", person: "Mum", pct: 79, color: "from-fuchsia-500 to-purple-500" },
+            { feature: "Jawline", person: "Grandpa", pct: 72, color: "from-amber-400 to-orange-500" },
           ].map((row, i) => (
             <motion.div
               key={row.feature}
@@ -183,7 +180,9 @@ const Splash = () => {
             >
               <div className="flex items-center justify-between text-sm">
                 <span className="font-medium">{row.feature}</span>
-                <span className="text-muted-foreground text-xs">You got it from <span className="text-foreground font-medium">{row.person}</span></span>
+                <span className="text-muted-foreground text-xs">
+                  You got it from <span className="text-foreground font-medium">{row.person}</span>
+                </span>
               </div>
               <div className="h-1.5 rounded-full bg-white/8 overflow-hidden">
                 <motion.div
@@ -191,7 +190,7 @@ const Splash = () => {
                   initial={{ width: 0 }}
                   whileInView={{ width: `${row.pct}%` }}
                   viewport={{ once: true }}
-                  transition={{ duration: 0.8, delay: 0.2 + i * 0.1, ease: 'easeOut' }}
+                  transition={{ duration: 0.8, delay: 0.2 + i * 0.1, ease: "easeOut" }}
                 />
               </div>
               <p className="text-xs text-muted-foreground">{row.pct}% similarity</p>
@@ -243,7 +242,7 @@ const Splash = () => {
         </motion.p>
         <motion.button
           className="btn-gradient px-8 py-3.5 text-base font-semibold flex items-center gap-2 mt-2"
-          onClick={() => navigate('/auth')}
+          onClick={() => navigate("/auth")}
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.97 }}
           initial={{ opacity: 0, y: 8 }}
@@ -253,9 +252,7 @@ const Splash = () => {
         >
           Get started free <ArrowRight size={18} />
         </motion.button>
-        <p className="text-xs text-muted-foreground">
-          Fun visual resemblance tool. Not a genetic or paternity test.
-        </p>
+        <p className="text-xs text-muted-foreground">Fun visual resemblance tool. Not a genetic or paternity test.</p>
       </section>
     </div>
   );
