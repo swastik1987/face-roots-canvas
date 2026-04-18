@@ -63,6 +63,7 @@ const Capture = () => {
   const [cameraError, setCameraError] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [showFlash, setShowFlash] = useState(false);
+  const [alignmentHint, setAlignmentHint] = useState<string | null>(null);
 
   // ── Detector init ──────────────────────────────────────────────────────────
 
@@ -106,6 +107,7 @@ const Capture = () => {
 
     if (!facesFound) {
       setHasFace(false);
+      setAlignmentHint('No face detected');
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
@@ -118,6 +120,7 @@ const Capture = () => {
       (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
     if (faceArea < MIN_FACE_RATIO) {
       setHasFace(false);
+      setAlignmentHint('Move closer');
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
@@ -128,13 +131,18 @@ const Capture = () => {
 
     const pose = extractPose(result);
     if (!pose) {
+      setAlignmentHint(null);
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
       return;
     }
 
-    if (Math.abs(pose.yaw) < YAW_MAX && Math.abs(pose.pitch) < PITCH_MAX) {
+    const yawOk = Math.abs(pose.yaw) < YAW_MAX;
+    const pitchOk = Math.abs(pose.pitch) < PITCH_MAX;
+
+    if (yawOk && pitchOk) {
+      setAlignmentHint(null);
       const now = performance.now();
       if (!stableStartRef.current) stableStartRef.current = now;
       const elapsed = now - stableStartRef.current;
@@ -147,6 +155,18 @@ const Capture = () => {
         return;
       }
     } else {
+      // Pick the worst axis to coach the user one nudge at a time.
+      // Note: video is mirrored — positive yaw means the user's head is
+      // turned to *their* left, which appears on the right side of the screen.
+      const yawErr = Math.abs(pose.yaw) - YAW_MAX;
+      const pitchErr = Math.abs(pose.pitch) - PITCH_MAX;
+      let hint: string;
+      if (yawErr >= pitchErr) {
+        hint = pose.yaw > 0 ? 'Turn slightly right' : 'Turn slightly left';
+      } else {
+        hint = pose.pitch > 0 ? 'Tilt down' : 'Tilt up';
+      }
+      setAlignmentHint(hint);
       stableStartRef.current = null;
       setStableProgress(0);
     }
@@ -413,15 +433,21 @@ const Capture = () => {
             hasFace={hasFace}
             captured={isCapturedStep}
           />
-          <AnimatePresence>
-            {hasFace && !isCapturedStep && step !== 'loading' && (
+          <AnimatePresence mode="wait">
+            {!isCapturedStep && step !== 'loading' && (alignmentHint || hasFace) && (
               <motion.div
-                className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-medium text-cyan bg-cyan/10 border border-cyan/30 rounded-full px-3 py-1"
+                key={alignmentHint ?? 'aligned'}
+                className={`absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-medium rounded-full px-3 py-1 border ${
+                  alignmentHint
+                    ? 'text-amber-300 bg-amber-300/10 border-amber-300/30'
+                    : 'text-cyan bg-cyan/10 border-cyan/30'
+                }`}
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.18 }}
               >
-                Face detected
+                {alignmentHint ?? 'Face detected'}
               </motion.div>
             )}
           </AnimatePresence>
