@@ -9,6 +9,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Sparkles } from 'lucide-react';
 import { useState } from 'react';
+import { getFeatureColor } from '@/lib/results/featureColors';
 
 export type ConfidenceTier = 'High' | 'Medium' | 'Low';
 
@@ -75,9 +76,9 @@ export function FeatureCard({
   const label = FEATURE_LABELS[featureType] ?? featureType.replace(/_/g, ' ');
   const relationship = winnerRelationship.replace(/_/g, ' ');
 
-  // Gradient hue matching FaceSilhouette pin color
-  const hue = Math.round(186 + (310 - 186) * similarity);
-  const accentColor = `hsl(${hue} 100% 60%)`;
+  // Per-feature signature color (matches FaceSilhouette pin)
+  const featureColor = getFeatureColor(featureType);
+  const accentColor = featureColor.solid;
 
   return (
     <motion.div
@@ -133,8 +134,7 @@ export function FeatureCard({
       {/* ── Similarity bar ─────────────────────────────────────────────────── */}
       <div className="h-0.5 bg-white/5 mx-4">
         <motion.div
-          className="h-full rounded-full"
-          style={{ background: accentColor }}
+          className={`h-full rounded-full bg-gradient-to-r ${featureColor.gradient}`}
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}
           transition={{ delay: 0.2 + index * 0.06, duration: 0.7, ease: 'easeOut' }}
