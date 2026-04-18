@@ -433,15 +433,21 @@ const Capture = () => {
             hasFace={hasFace}
             captured={isCapturedStep}
           />
-          <AnimatePresence>
-            {hasFace && !isCapturedStep && step !== 'loading' && (
+          <AnimatePresence mode="wait">
+            {!isCapturedStep && step !== 'loading' && (alignmentHint || hasFace) && (
               <motion.div
-                className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-medium text-cyan bg-cyan/10 border border-cyan/30 rounded-full px-3 py-1"
+                key={alignmentHint ?? 'aligned'}
+                className={`absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-medium rounded-full px-3 py-1 border ${
+                  alignmentHint
+                    ? 'text-amber-300 bg-amber-300/10 border-amber-300/30'
+                    : 'text-cyan bg-cyan/10 border-cyan/30'
+                }`}
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.18 }}
               >
-                Face detected
+                {alignmentHint ?? 'Face detected'}
               </motion.div>
             )}
           </AnimatePresence>
