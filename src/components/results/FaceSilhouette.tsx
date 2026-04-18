@@ -6,6 +6,7 @@
  * The active pin pulses with a neon glow.
  */
 import { motion } from 'framer-motion';
+import { getFeatureColor } from '@/lib/results/featureColors';
 
 export type FeatureType =
   | 'eyes_left' | 'eyes_right' | 'nose' | 'mouth' | 'jawline'
@@ -33,13 +34,6 @@ const HOTSPOT_POSITIONS: Record<FeatureType, HotspotDef> = {
   jawline:         { x: 100, y: 218, label: 'Jawline' },
   face_shape:      { x: 100, y: 138, label: 'Face shape' },
 };
-
-// Color scale: cyan → magenta based on similarity
-function pinColor(similarity: number): string {
-  // similarity 0..1 → interpolate hue 186 (cyan) to 310 (magenta)
-  const hue = Math.round(186 + (310 - 186) * similarity);
-  return `hsl(${hue} 100% 60%)`;
-}
 
 interface HotspotPin {
   featureType: FeatureType;
@@ -163,7 +157,7 @@ export default function FaceSilhouette({ pins, activeFeature, onFeatureClick, se
         const pos = HOTSPOT_POSITIONS[pin.featureType];
         if (!pos) return null;
         const isActive = activeFeature === pin.featureType;
-        const color = pinColor(pin.similarity);
+        const color = getFeatureColor(pin.featureType).solid;
 
         return (
           <motion.g
