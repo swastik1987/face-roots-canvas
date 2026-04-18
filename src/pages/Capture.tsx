@@ -384,10 +384,12 @@ const Capture = () => {
 
   const isCapturedStep = step === 'captured_front';
 
+  const showLiveCamera = step === 'detecting_front' || step === 'loading';
+
   return (
     <div className="relative flex flex-col min-h-screen bg-black overflow-hidden">
-      {/* Camera feed */}
-      {!cameraError && (
+      {/* Camera feed — only during live detection */}
+      {!cameraError && showLiveCamera && (
         <Webcam
           ref={webcamRef}
           audio={false}
@@ -406,7 +408,9 @@ const Capture = () => {
       )}
 
       {/* Gradient overlays */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/70 pointer-events-none" />
+      {showLiveCamera && (
+        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/70 pointer-events-none" />
+      )}
 
       {/* Capture flash */}
       <AnimatePresence>
@@ -421,52 +425,89 @@ const Capture = () => {
         )}
       </AnimatePresence>
 
-      {/* Oval overlay */}
-      <div
-        className="absolute inset-0 flex items-center justify-center pointer-events-none"
-        style={{ marginTop: '-5%' }}
-      >
-        <div className="relative">
-          <OvalOverlay
-            progress={stableProgress}
-            hasFace={hasFace}
-            captured={isCapturedStep}
-          />
-          <AnimatePresence mode="wait">
-            {!isCapturedStep && step !== 'loading' && (alignmentHint || hasFace) && (
-              <motion.div
-                key={alignmentHint ?? 'aligned'}
-                className={`absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-medium rounded-full px-3 py-1 border ${
-                  alignmentHint
-                    ? 'text-amber-300 bg-amber-300/10 border-amber-300/30'
-                    : 'text-cyan bg-cyan/10 border-cyan/30'
-                }`}
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.18 }}
-              >
-                {alignmentHint ?? 'Face detected'}
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <AnimatePresence>
-            {isCapturedStep && (
-              <motion.div
-                className="absolute inset-0 flex items-center justify-center"
-                initial={{ opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              >
-                <div className="bg-black/60 rounded-full p-4 backdrop-blur-sm border border-cyan/40">
-                  <CheckCircle2 size={48} className="text-cyan" />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+      {/* Oval overlay — full-height, only during live detection */}
+      {showLiveCamera && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div
+            className="relative"
+            style={{ height: '92vh', aspectRatio: '260/340' }}
+          >
+            <OvalOverlay
+              progress={stableProgress}
+              hasFace={hasFace}
+              captured={false}
+            />
+            <AnimatePresence mode="wait">
+              {step === 'detecting_front' && (alignmentHint || hasFace) && (
+                <motion.div
+                  key={alignmentHint ?? 'aligned'}
+                  className={`absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-medium rounded-full px-3 py-1 border ${
+                    alignmentHint
+                      ? 'text-amber-300 bg-amber-300/10 border-amber-300/30'
+                      : 'text-cyan bg-cyan/10 border-cyan/30'
+                  }`}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.18 }}
+                >
+                  {alignmentHint ?? 'Face detected'}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Captured-front review: show preview + Retake / Submit */}
+      {isCapturedStep && frames.front?.imageDataUrl && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-6 z-10">
+          <div
+            className="relative"
+            style={{ height: '70vh', aspectRatio: '260/340' }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 260 340"
+              preserveAspectRatio="xMidYMid meet"
+            >
+              <defs>
+                <clipPath id="review-oval-clip">
+                  <ellipse cx="130" cy="170" rx="110" ry="150" />
+                </clipPath>
+              </defs>
+              <image
+                href={frames.front.imageDataUrl}
+                x="20" y="20"
+                width="220" height="300"
+                clipPath="url(#review-oval-clip)"
+                preserveAspectRatio="xMidYMid slice"
+              />
+              <ellipse
+                cx="130" cy="170" rx="110" ry="150"
+                fill="none"
+                stroke="rgba(0,229,255,0.9)"
+                strokeWidth="2.5"
+              />
+            </svg>
+          </div>
+          <div className="flex gap-3 mt-6 w-full max-w-sm">
+            <button
+              className="flex-1 px-6 py-3 rounded-full border border-white/30 text-white/90 text-sm font-medium hover:bg-white/5 transition"
+              onClick={retry}
+            >
+              Retake
+            </button>
+            <button
+              className="flex-1 btn-gradient px-6 py-3 text-sm"
+              onClick={() => setStep('uploading')}
+            >
+              Submit
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Top instruction bar */}
       <div className="relative z-10 pt-16 px-6 text-center">
