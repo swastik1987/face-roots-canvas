@@ -256,7 +256,6 @@ const Capture = () => {
         bbox,
       });
       setStep('captured_front');
-      setTimeout(() => setStep('uploading'), 900);
     }, 'image/jpeg', 0.92);
   };
 
