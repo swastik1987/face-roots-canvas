@@ -473,93 +473,183 @@ const Home = () => {
   // Parse rate limit error for friendly display
   const rateLimitInfo = analyzeError ? parseRateLimitError(analyzeError) : null;
 
+  // ── Determine Tree Tiers ──────────────────────────────────────────────────
+  const RELATIONSHIP_GENERATIONS: Record<string, number> = {
+    mother: 1,
+    father: 1,
+    maternal_grandma: 2,
+    maternal_grandpa: 2,
+    paternal_grandma: 2,
+    paternal_grandpa: 2,
+    sibling: 0,
+    uncle: 1,
+    aunt: 1,
+    child: -1,
+    other: 0,
+  };
+
+  const getGen = (tag: string) => RELATIONSHIP_GENERATIONS[tag] ?? 0;
+
+  const grandParents = family.filter((f) => getGen(f.relationship_tag) === 2);
+  const parents = family.filter((f) => getGen(f.relationship_tag) === 1);
+  const peers = family.filter((f) => getGen(f.relationship_tag) === 0);
+  const children = family.filter((f) => getGen(f.relationship_tag) === -1);
+
+  const emptySlotsByGen = {
+    2: emptySlots.filter((s) => getGen(s.tag) === 2),
+    1: emptySlots.filter((s) => getGen(s.tag) === 1),
+    0: emptySlots.filter((s) => getGen(s.tag) === 0),
+    "-1": emptySlots.filter((s) => getGen(s.tag) === -1),
+  };
+
+  const getMemberHandler = (person: Person) => {
+    return async () => {
+      const { data: images } = await supabase
+        .from("face_images")
+        .select("storage_path")
+        .eq("person_id", person.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const path = images?.[0]?.storage_path;
+      let url: string | null = null;
+      if (path) {
+        const { data } = await supabase.storage.from("face-images-raw").createSignedUrl(path, 900);
+        url = data?.signedUrl ?? null;
+      }
+      openEditSheet(person, url);
+    };
+  };
+
+  const renderMember = (person: Person, delayIndex: number) => (
+    <motion.div
+      key={person.id}
+      className="glass-card p-4 flex flex-col items-center gap-3 cursor-pointer hover:bg-white/10 transition-colors w-28 sm:w-32 z-10"
+      role="listitem"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...spring, delay: 0.15 + delayIndex * 0.05 }}
+      onClick={getMemberHandler(person)}
+      tabIndex={0}
+      aria-label={`${person.display_name} — tap to edit photo`}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.click();
+      }}
+    >
+      <FamilyMemberAvatar person={person} />
+      <div className="text-center w-full">
+        <div className="text-sm font-semibold truncate w-full">{person.display_name}</div>
+        <div className="text-[10px] text-cyan/80 uppercase tracking-widest truncate w-full mt-0.5">
+          {person.relationship_tag.replace(/_/g, " ")}
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  const renderEmptySlot = (slot: (typeof EMPTY_SLOTS)[0], delayIndex: number) => (
+    <motion.button
+      key={slot.tag}
+      className="glass-card border-dashed border-white/20 p-4 flex flex-col items-center justify-start gap-4 cursor-pointer hover:bg-white/10 transition-colors w-28 sm:w-32 focus-visible:ring-2 focus-visible:ring-cyan focus-visible:outline-none z-10"
+      onClick={() => navigate(`/family/add?tag=${slot.tag}`)}
+      aria-label={slot.label}
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...spring, delay: 0.2 + delayIndex * 0.05 }}
+    >
+      <div
+        className="w-16 h-20 rounded-full border-2 border-dashed border-white/20 flex flex-col items-center justify-center bg-white/5 transition-colors"
+        style={{ borderRadius: "50% / 50%" }}
+      >
+        <Plus size={24} className="text-muted-foreground" aria-hidden="true" />
+      </div>
+      <div className="text-center">
+        <div className="text-xs text-muted-foreground font-medium leading-tight">{slot.label}</div>
+      </div>
+    </motion.button>
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <main className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24">
-      <motion.h1 className="text-2xl font-bold" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={spring}>
-        Your family
+    <main className="flex flex-col items-center min-h-screen px-4 sm:px-8 pt-12 gap-10 pb-32 max-w-5xl mx-auto w-full relative">
+      <motion.h1
+        className="text-3xl font-bold tracking-tight"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={spring}
+      >
+        Family Tree
       </motion.h1>
 
-      {/* Self avatar */}
-      <SelfAvatar
-        self={self}
-        thumbnailUrl={selfThumbnailUrl}
-        facePosition={selfFacePosition}
-        onClick={() => navigate("/capture")}
-        onEdit={() => self && openEditSheet(self, selfThumbnailUrl)}
-      />
+      <div className="flex flex-col items-center gap-14 w-full relative mt-4">
+        {/* Decorative Spine Line */}
+        <div className="absolute top-8 bottom-0 left-1/2 w-px bg-gradient-to-b from-cyan/50 via-white/10 to-transparent -translate-x-1/2 -z-0 hidden md:block" />
 
-      {/* Family members already added */}
-      {family.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 w-full max-w-sm" role="list" aria-label="Family members">
-          {family.map((person, i) => (
-            <motion.div
-              key={person.id}
-              className="glass-card p-5 flex flex-col items-center gap-2 cursor-pointer hover:bg-white/5 transition-colors"
-              role="listitem"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ ...spring, delay: 0.15 + i * 0.05 }}
-              onClick={() => {
-                // We need the thumbnail URL — FamilyMemberAvatar fetches it internally,
-                // so we fetch it here too for the sheet
-                const fetchAndOpen = async () => {
-                  const { data: images } = await supabase
-                    .from("face_images")
-                    .select("storage_path")
-                    .eq("person_id", person.id)
-                    .order("created_at", { ascending: false })
-                    .limit(1);
-                  const path = images?.[0]?.storage_path;
-                  let url: string | null = null;
-                  if (path) {
-                    const { data } = await supabase.storage.from("face-images-raw").createSignedUrl(path, 900);
-                    url = data?.signedUrl ?? null;
-                  }
-                  openEditSheet(person, url);
-                };
-                fetchAndOpen();
-              }}
-              tabIndex={0}
-              aria-label={`${person.display_name} — tap to edit photo`}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.currentTarget.click();
-              }}
-            >
-              <FamilyMemberAvatar person={person} />
-              <span className="text-xs font-medium text-center leading-tight">{person.display_name}</span>
-              <span className="text-xs text-muted-foreground capitalize">
-                {person.relationship_tag.replace(/_/g, " ")}
-              </span>
-            </motion.div>
-          ))}
-        </div>
-      )}
+        {/* Tier 2: Grandparents */}
+        {(grandParents.length > 0 || emptySlotsByGen[2].length > 0) && (
+          <div className="flex flex-col items-center gap-5 w-full">
+            <h3 className="text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold bg-background px-4 relative z-10">
+              Grandparents
+            </h3>
+            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 w-full">
+              {grandParents.map((p, i) => renderMember(p, i))}
+              {emptySlotsByGen[2].map((s, i) => renderEmptySlot(s, grandParents.length + i))}
+            </div>
+          </div>
+        )}
 
-      {/* Empty slots */}
-      {emptySlots.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
-          {emptySlots.map((slot, i) => (
-            <motion.button
-              key={slot.tag}
-              className="glass-card p-6 flex flex-col items-center gap-2 hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-cyan focus-visible:outline-none"
-              onClick={() => navigate(`/family/add?tag=${slot.tag}`)}
-              aria-label={slot.label}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ ...spring, delay: 0.2 + i * 0.05 }}
-            >
-              <Plus size={24} className="text-cyan" aria-hidden="true" />
-              <span className="text-sm text-muted-foreground">{slot.label}</span>
-            </motion.button>
-          ))}
+        {/* Tier 1: Parents */}
+        {(parents.length > 0 || emptySlotsByGen[1].length > 0) && (
+          <div className="flex flex-col items-center gap-5 w-full">
+            <h3 className="text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold bg-background px-4 relative z-10">
+              Parents
+            </h3>
+            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 w-full">
+              {parents.map((p, i) => renderMember(p, i))}
+              {emptySlotsByGen[1].map((s, i) => renderEmptySlot(s, parents.length + i))}
+            </div>
+          </div>
+        )}
+
+        {/* Tier 0: You & Siblings */}
+        <div className="flex flex-col items-center gap-5 w-full">
+          <h3 className="text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold bg-background px-4 relative z-10">
+            You & Siblings
+          </h3>
+          <div className="flex flex-wrap justify-center items-center gap-4 sm:gap-8 w-full relative z-10">
+            {peers.map((p, i) => renderMember(p, i))}
+
+            {/* Self Avatar */}
+            <div className="mx-2 sm:mx-6 flex-shrink-0 z-10">
+              <SelfAvatar
+                self={self}
+                thumbnailUrl={selfThumbnailUrl}
+                facePosition={selfFacePosition}
+                onClick={() => navigate("/capture")}
+                onEdit={() => self && openEditSheet(self, selfThumbnailUrl)}
+              />
+            </div>
+
+            {emptySlotsByGen[0].map((s, i) => renderEmptySlot(s, peers.length + i))}
+          </div>
         </div>
-      )}
+
+        {/* Tier -1: Children */}
+        {(children.length > 0 || emptySlotsByGen["-1"].length > 0) && (
+          <div className="flex flex-col items-center gap-5 w-full">
+            <h3 className="text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold bg-background px-4 relative z-10">
+              Children
+            </h3>
+            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 w-full">
+              {children.map((p, i) => renderMember(p, i))}
+              {emptySlotsByGen["-1"].map((s, i) => renderEmptySlot(s, children.length + i))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* CTA */}
-      <div className="flex flex-col items-center gap-2">
+      <div className="flex flex-col items-center gap-3 mt-8 relative z-10 bg-background/80 p-4 rounded-3xl backdrop-blur-sm border border-white/5">
         <motion.button
-          className="btn-gradient px-8 py-3 text-base mt-4 disabled:opacity-40 flex items-center gap-2"
+          className="btn-gradient px-8 py-3.5 text-base font-medium disabled:opacity-40 flex items-center gap-2 shadow-lg shadow-cyan/20"
           onClick={canAnalyze ? startAnalysis : () => navigate("/capture")}
           disabled={analyzing}
           aria-busy={analyzing}
@@ -570,26 +660,28 @@ const Home = () => {
           whileHover={!analyzing ? { scale: 1.04 } : {}}
           whileTap={!analyzing ? { scale: 0.97 } : {}}
         >
-          {analyzing && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+          {analyzing && <Loader2 size={18} className="animate-spin" aria-hidden="true" />}
           {canAnalyze ? "Discover your Family DNA" : "Add yourself + 1 family member to start"}
         </motion.button>
 
-        {analyzing && analyzeStatus && <p className="text-xs text-cyan/70 animate-pulse">{analyzeStatus}</p>}
+        {analyzing && analyzeStatus && (
+          <p className="text-sm font-medium text-cyan animate-pulse mt-2">{analyzeStatus}</p>
+        )}
 
         {analyzeError && (
-          <div className="flex flex-col items-center gap-1.5 max-w-xs" role="alert">
+          <div className="flex flex-col items-center gap-1.5 max-w-sm px-4 text-center mt-2" role="alert">
             {rateLimitInfo?.isRateLimit ? (
               <>
                 <div className="flex items-center gap-1.5 text-amber-400">
-                  <Clock size={14} />
-                  <p className="text-sm font-medium">Daily limit reached</p>
+                  <Clock size={16} />
+                  <p className="text-sm font-semibold">Daily limit reached</p>
                 </div>
-                <p className="text-xs text-muted-foreground text-center">
+                <p className="text-xs text-muted-foreground">
                   You've used all your analyses for today. Try again in ~{rateLimitInfo.hoursLeft}h.
                 </p>
               </>
             ) : (
-              <p className="text-xs text-destructive text-center">{analyzeError}</p>
+              <p className="text-sm font-medium text-destructive">{analyzeError}</p>
             )}
           </div>
         )}
