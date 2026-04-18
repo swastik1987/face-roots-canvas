@@ -16,12 +16,15 @@ import type { Person } from "@/lib/supabase";
 
 const spring = { type: "spring" as const, stiffness: 300, damping: 26 };
 
-// Relationship slots shown on the home screen
-const EMPTY_SLOTS = [
+const ALL_SLOTS = [
   { label: "Add Mom", tag: "mother" },
   { label: "Add Dad", tag: "father" },
-  { label: "Add Grandparent", tag: "maternal_grandma" },
+  { label: "Add Grandpa (P)", tag: "paternal_grandpa" },
+  { label: "Add Grandma (P)", tag: "paternal_grandma" },
+  { label: "Add Grandpa (M)", tag: "maternal_grandpa" },
+  { label: "Add Grandma (M)", tag: "maternal_grandma" },
   { label: "Add Sibling", tag: "sibling" },
+  { label: "Add Child", tag: "child" },
 ];
 
 // ── Loading skeleton ───────────────────────────────────────────────────────────
@@ -29,21 +32,16 @@ const EMPTY_SLOTS = [
 function HomeSkeleton() {
   return (
     <div
-      className="flex flex-col items-center min-h-screen px-6 pt-12 gap-8 pb-24"
+      className="flex flex-col items-center min-h-screen px-4 sm:px-8 pt-12 gap-8 pb-24"
       aria-busy="true"
       aria-label="Loading family tree"
     >
       <Skeleton className="h-7 w-36 rounded-lg" />
-      <div className="flex flex-col items-center gap-2">
-        <Skeleton className="w-24 h-24 rounded-full" />
-        <Skeleton className="h-4 w-20 rounded" />
+      <div className="flex flex-row justify-center gap-4 sm:gap-8 w-full max-w-4xl mt-10">
+        <Skeleton className="w-[120px] h-32 rounded-3xl" />
+        <Skeleton className="w-[120px] h-32 rounded-3xl" />
       </div>
-      <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
-        {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-28 rounded-2xl" />
-        ))}
-      </div>
-      <Skeleton className="h-12 w-52 rounded-full mt-4" />
+      <Skeleton className="h-12 w-52 rounded-full mt-8" />
     </div>
   );
 }
@@ -68,7 +66,7 @@ function SelfAvatar({
   return (
     <div className="flex flex-col items-center gap-2">
       <motion.div
-        className={`relative w-24 h-32 rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
+        className={`relative w-20 h-24 sm:w-24 sm:h-32 rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
           captured ? "border-cyan shadow-[0_0_16px_rgba(0,229,255,0.4)]" : "border-dashed border-white/20 bg-white/5"
         }`}
         style={{ borderRadius: "50% / 50%", aspectRatio: "auto" }} // Explicitly override rounded-full constraint for an oval
@@ -192,9 +190,33 @@ const Home = () => {
 
   const canAnalyze = !!self && family.length >= 1;
 
-  // Determine which empty slots still need to be filled
+  // Determine which empty slots still need to be filled based on progressive disclosure
   const filledTags = new Set(family.map((p) => p.relationship_tag));
-  const emptySlots = EMPTY_SLOTS.filter((s) => !filledTags.has(s.tag));
+
+  const activeEmptySlots = ALL_SLOTS.filter((slot) => {
+    // Allow multiple siblings/children
+    if (["sibling", "child"].includes(slot.tag)) {
+      // Only show child slot if there's already a child (otherwise rely on "Add Another")
+      if (slot.tag === "child" && !filledTags.has("child")) return false;
+      return true;
+    }
+
+    // Unique slots: don't show if already filled
+    if (filledTags.has(slot.tag)) return false;
+
+    // Progressive disclosure for Grandparents
+    if (slot.tag === "paternal_grandpa" || slot.tag === "paternal_grandma") {
+      return filledTags.has("father") || filledTags.has("paternal_grandpa") || filledTags.has("paternal_grandma");
+    }
+
+    if (slot.tag === "maternal_grandpa" || slot.tag === "maternal_grandma") {
+      return filledTags.has("mother") || filledTags.has("maternal_grandpa") || filledTags.has("maternal_grandma");
+    }
+
+    return true; // Mom & Dad by default
+  });
+
+  const getTargetSlots = (tags: string[]) => activeEmptySlots.filter((s) => tags.includes(s.tag));
 
   // ── Open edit sheet for a person ──────────────────────────────────────────
 
@@ -473,35 +495,6 @@ const Home = () => {
   // Parse rate limit error for friendly display
   const rateLimitInfo = analyzeError ? parseRateLimitError(analyzeError) : null;
 
-  // ── Determine Tree Tiers ──────────────────────────────────────────────────
-  const RELATIONSHIP_GENERATIONS: Record<string, number> = {
-    mother: 1,
-    father: 1,
-    maternal_grandma: 2,
-    maternal_grandpa: 2,
-    paternal_grandma: 2,
-    paternal_grandpa: 2,
-    sibling: 0,
-    uncle: 1,
-    aunt: 1,
-    child: -1,
-    other: 0,
-  };
-
-  const getGen = (tag: string) => RELATIONSHIP_GENERATIONS[tag] ?? 0;
-
-  const grandParents = family.filter((f) => getGen(f.relationship_tag) === 2);
-  const parents = family.filter((f) => getGen(f.relationship_tag) === 1);
-  const peers = family.filter((f) => getGen(f.relationship_tag) === 0);
-  const children = family.filter((f) => getGen(f.relationship_tag) === -1);
-
-  const emptySlotsByGen = {
-    2: emptySlots.filter((s) => getGen(s.tag) === 2),
-    1: emptySlots.filter((s) => getGen(s.tag) === 1),
-    0: emptySlots.filter((s) => getGen(s.tag) === 0),
-    "-1": emptySlots.filter((s) => getGen(s.tag) === -1),
-  };
-
   const getMemberHandler = (person: Person) => {
     return async () => {
       const { data: images } = await supabase
@@ -523,7 +516,7 @@ const Home = () => {
   const renderMember = (person: Person, delayIndex: number) => (
     <motion.div
       key={person.id}
-      className="glass-card p-4 flex flex-col items-center gap-3 cursor-pointer hover:bg-white/10 transition-colors w-28 sm:w-32 z-10"
+      className="glass-card p-2 sm:p-4 flex flex-col items-center gap-2 cursor-pointer hover:bg-white/10 transition-colors w-[80px] sm:w-[120px] z-10 shrink-0"
       role="listitem"
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
@@ -536,19 +529,19 @@ const Home = () => {
       }}
     >
       <FamilyMemberAvatar person={person} />
-      <div className="text-center w-full">
-        <div className="text-sm font-semibold truncate w-full">{person.display_name}</div>
-        <div className="text-[10px] text-cyan/80 uppercase tracking-widest truncate w-full mt-0.5">
+      <div className="text-center w-full px-0.5">
+        <div className="text-[11px] sm:text-sm font-semibold truncate w-full">{person.display_name}</div>
+        <div className="text-[9px] sm:text-[10px] text-cyan/80 uppercase tracking-widest truncate w-full mt-0.5">
           {person.relationship_tag.replace(/_/g, " ")}
         </div>
       </div>
     </motion.div>
   );
 
-  const renderEmptySlot = (slot: (typeof EMPTY_SLOTS)[0], delayIndex: number) => (
+  const renderEmptySlot = (slot: (typeof ALL_SLOTS)[0], delayIndex: number) => (
     <motion.button
       key={slot.tag}
-      className="glass-card border-dashed border-white/20 p-4 flex flex-col items-center justify-start gap-4 cursor-pointer hover:bg-white/10 transition-colors w-28 sm:w-32 focus-visible:ring-2 focus-visible:ring-cyan focus-visible:outline-none z-10"
+      className="glass-card border-dashed border-white/20 p-2 sm:p-4 flex flex-col items-center justify-start gap-2 cursor-pointer hover:bg-white/10 transition-colors w-[80px] sm:w-[120px] focus-visible:ring-2 focus-visible:ring-cyan focus-visible:outline-none z-10 shrink-0"
       onClick={() => navigate(`/family/add?tag=${slot.tag}`)}
       aria-label={slot.label}
       initial={{ opacity: 0, y: 16 }}
@@ -556,22 +549,34 @@ const Home = () => {
       transition={{ ...spring, delay: 0.2 + delayIndex * 0.05 }}
     >
       <div
-        className="w-16 h-20 rounded-full border-2 border-dashed border-white/20 flex flex-col items-center justify-center bg-white/5 transition-colors"
+        className="w-12 h-14 sm:w-16 sm:h-20 rounded-full border-2 border-dashed border-white/20 flex flex-col items-center justify-center bg-white/5 transition-colors shrink-0"
         style={{ borderRadius: "50% / 50%" }}
       >
-        <Plus size={24} className="text-muted-foreground" aria-hidden="true" />
+        <Plus size={18} className="text-muted-foreground sm:w-6 sm:h-6" aria-hidden="true" />
       </div>
-      <div className="text-center">
-        <div className="text-xs text-muted-foreground font-medium leading-tight">{slot.label}</div>
+      <div className="text-center w-full px-0.5">
+        <div className="text-[10px] sm:text-xs text-muted-foreground font-medium leading-tight">{slot.label}</div>
       </div>
     </motion.button>
   );
 
+  const renderNodeGroup = (tags: string[]) => {
+    const members = family.filter((f) => tags.includes(f.relationship_tag));
+    const groupEmptySlots = getTargetSlots(tags);
+
+    return (
+      <>
+        {members.map((p, i) => renderMember(p, i))}
+        {groupEmptySlots.map((s, i) => renderEmptySlot(s, members.length + i))}
+      </>
+    );
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <main className="flex flex-col items-center min-h-screen px-4 sm:px-8 pt-12 gap-10 pb-32 max-w-5xl mx-auto w-full relative">
+    <main className="flex flex-col items-center min-h-screen px-2 sm:px-8 pt-6 sm:pt-12 gap-8 pb-32 max-w-5xl mx-auto w-full relative overflow-x-hidden">
       <motion.h1
-        className="text-3xl font-bold tracking-tight"
+        className="text-2xl sm:text-3xl font-bold tracking-tight"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={spring}
@@ -579,46 +584,81 @@ const Home = () => {
         Family Tree
       </motion.h1>
 
-      <div className="flex flex-col items-center gap-14 w-full relative mt-4">
-        {/* Decorative Spine Line */}
-        <div className="absolute top-8 bottom-0 left-1/2 w-px bg-gradient-to-b from-cyan/50 via-white/10 to-transparent -translate-x-1/2 -z-0 hidden md:block" />
+      <div className="flex flex-col items-center w-full relative mt-2 gap-8 sm:gap-14">
+        {/* --- TIER 1: Grandparents & Parents --- */}
+        <div className="flex flex-row justify-between w-full max-w-4xl relative gap-2 sm:gap-8 bg-black/20 rounded-3xl p-3 sm:p-8 border border-white/5 mx-auto">
+          {/* Central Divider */}
+          <div className="absolute top-8 bottom-8 left-1/2 w-px bg-white/10 -translate-x-1/2 pointer-events-none hidden sm:block" />
 
-        {/* Tier 2: Grandparents */}
-        {(grandParents.length > 0 || emptySlotsByGen[2].length > 0) && (
-          <div className="flex flex-col items-center gap-5 w-full">
-            <h3 className="text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold bg-background px-4 relative z-10">
-              Grandparents
+          {/* PATERNAL BRANCH */}
+          <div className="flex flex-col items-center w-1/2 relative gap-4 sm:gap-8">
+            <h3 className="text-[10px] sm:text-xs tracking-widest uppercase font-bold text-cyan/60 bg-background/50 px-3 py-1 rounded-full border border-cyan/10">
+              Paternal
             </h3>
-            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 w-full">
-              {grandParents.map((p, i) => renderMember(p, i))}
-              {emptySlotsByGen[2].map((s, i) => renderEmptySlot(s, grandParents.length + i))}
+
+            {(filledTags.has("father") || filledTags.has("paternal_grandpa") || filledTags.has("paternal_grandma")) && (
+              <div className="flex flex-col items-center gap-2 sm:gap-4 w-full">
+                <div className="text-[9px] uppercase tracking-wider text-muted-foreground/50 hidden sm:block">
+                  Grandparents
+                </div>
+                <div className="flex flex-row flex-wrap justify-center gap-2 sm:gap-4 w-full">
+                  {renderNodeGroup(["paternal_grandpa", "paternal_grandma"])}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col items-center gap-2 sm:gap-4 w-full mt-auto">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground/50 hidden sm:block">Parent</div>
+              <div className="flex justify-center w-full">{renderNodeGroup(["father"])}</div>
+            </div>
+          </div>
+
+          {/* MATERNAL BRANCH */}
+          <div className="flex flex-col items-center w-1/2 relative gap-4 sm:gap-8">
+            <h3 className="text-[10px] sm:text-xs tracking-widest uppercase font-bold text-pink-500/60 bg-background/50 px-3 py-1 rounded-full border border-pink-500/10">
+              Maternal
+            </h3>
+
+            {(filledTags.has("mother") || filledTags.has("maternal_grandpa") || filledTags.has("maternal_grandma")) && (
+              <div className="flex flex-col items-center gap-2 sm:gap-4 w-full">
+                <div className="text-[9px] uppercase tracking-wider text-muted-foreground/50 hidden sm:block">
+                  Grandparents
+                </div>
+                <div className="flex flex-row flex-wrap justify-center gap-2 sm:gap-4 w-full">
+                  {renderNodeGroup(["maternal_grandpa", "maternal_grandma"])}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col items-center gap-2 sm:gap-4 w-full mt-auto">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground/50 hidden sm:block">Parent</div>
+              <div className="flex justify-center w-full">{renderNodeGroup(["mother"])}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* --- TIER 1.5: Extended Family (Aunts/Uncles) --- */}
+        {family.some((f) => ["uncle", "aunt"].includes(f.relationship_tag)) && (
+          <div className="flex flex-col items-center gap-3 w-full">
+            <h3 className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-2">
+              Extended
+            </h3>
+            <div className="flex flex-row flex-wrap justify-center gap-2 sm:gap-4 w-full">
+              {renderNodeGroup(["uncle", "aunt"])}
             </div>
           </div>
         )}
 
-        {/* Tier 1: Parents */}
-        {(parents.length > 0 || emptySlotsByGen[1].length > 0) && (
-          <div className="flex flex-col items-center gap-5 w-full">
-            <h3 className="text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold bg-background px-4 relative z-10">
-              Parents
-            </h3>
-            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 w-full">
-              {parents.map((p, i) => renderMember(p, i))}
-              {emptySlotsByGen[1].map((s, i) => renderEmptySlot(s, parents.length + i))}
-            </div>
-          </div>
-        )}
-
-        {/* Tier 0: You & Siblings */}
-        <div className="flex flex-col items-center gap-5 w-full">
-          <h3 className="text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold bg-background px-4 relative z-10">
+        {/* --- TIER 0: Self & Siblings --- */}
+        <div className="flex flex-col items-center gap-4 w-full relative bg-cyan/5 rounded-3xl p-4 sm:p-8 border border-cyan/10">
+          <h3 className="text-[10px] sm:text-xs uppercase tracking-widest text-cyan/70 font-semibold mb-2">
             You & Siblings
           </h3>
-          <div className="flex flex-wrap justify-center items-center gap-4 sm:gap-8 w-full relative z-10">
-            {peers.map((p, i) => renderMember(p, i))}
+          <div className="flex flex-row flex-wrap justify-center items-center gap-3 sm:gap-6 w-full">
+            {renderNodeGroup(["sibling", "other"])}
 
-            {/* Self Avatar */}
-            <div className="mx-2 sm:mx-6 flex-shrink-0 z-10">
+            {/* Self */}
+            <div className="mx-1 sm:mx-6 shrink-0 order-first lg:order-none z-10">
               <SelfAvatar
                 self={self}
                 thumbnailUrl={selfThumbnailUrl}
@@ -627,23 +667,31 @@ const Home = () => {
                 onEdit={() => self && openEditSheet(self, selfThumbnailUrl)}
               />
             </div>
-
-            {emptySlotsByGen[0].map((s, i) => renderEmptySlot(s, peers.length + i))}
           </div>
         </div>
 
-        {/* Tier -1: Children */}
-        {(children.length > 0 || emptySlotsByGen["-1"].length > 0) && (
-          <div className="flex flex-col items-center gap-5 w-full">
-            <h3 className="text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold bg-background px-4 relative z-10">
+        {/* --- TIER -1: Children --- */}
+        {(family.some((f) => f.relationship_tag === "child") || activeEmptySlots.some((s) => s.tag === "child")) && (
+          <div className="flex flex-col items-center gap-3 w-full bg-black/20 rounded-3xl p-4 sm:p-8 border border-white/5">
+            <h3 className="text-[10px] sm:text-xs uppercase tracking-widest text-muted-foreground/60 font-semibold mb-2">
               Children
             </h3>
-            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 w-full">
-              {children.map((p, i) => renderMember(p, i))}
-              {emptySlotsByGen["-1"].map((s, i) => renderEmptySlot(s, children.length + i))}
+            <div className="flex flex-row flex-wrap justify-center gap-2 sm:gap-4 w-full">
+              {renderNodeGroup(["child"])}
             </div>
           </div>
         )}
+
+        {/* Generic Add Button */}
+        <motion.button
+          className="mt-2 flex items-center gap-2 px-6 py-2.5 rounded-full border border-dashed border-white/20 text-xs sm:text-sm font-medium hover:bg-white/10 transition-colors text-muted-foreground/80 hover:text-white"
+          onClick={() => navigate("/family/add?tag=other")}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          <Plus size={16} />
+          Add Another Relative
+        </motion.button>
       </div>
 
       {/* CTA */}
@@ -735,7 +783,7 @@ function FamilyMemberAvatar({ person }: { person: Person }) {
 
   return (
     <div
-      className="w-16 h-20 rounded-full overflow-hidden border border-white/15 bg-white/10 flex items-center justify-center"
+      className="w-12 h-14 sm:w-16 sm:h-20 rounded-full overflow-hidden border border-white/15 bg-white/10 flex items-center justify-center shrink-0"
       style={{ borderRadius: "50% / 50%" }}
     >
       {thumbnailUrl ? (
