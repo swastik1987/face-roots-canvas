@@ -32,15 +32,9 @@ import { buildLegacyCard, type CardMatch } from '../_shared/cards/legacyCard.ts'
 let wasmReady = false;
 let interFonts: { name: string; weight: number; style: string; data: ArrayBuffer }[] | null = null;
 
-// Satori requires TTF/OTF (not WOFF/WOFF2). Use unpkg which serves raw TTF files.
-const INTER_400 =
-  'https://cdn.jsdelivr.net/gh/rsms/inter@v4.0/docs/font-files/Inter-Regular.otf';
-const INTER_600 =
-  'https://cdn.jsdelivr.net/gh/rsms/inter@v4.0/docs/font-files/Inter-SemiBold.otf';
-const INTER_700 =
-  'https://cdn.jsdelivr.net/gh/rsms/inter@v4.0/docs/font-files/Inter-Bold.otf';
-const INTER_800 =
-  'https://cdn.jsdelivr.net/gh/rsms/inter@v4.0/docs/font-files/Inter-ExtraBold.otf';
+// Satori requires TTF/OTF (not WOFF/WOFF2). Inter variable font from Google Fonts repo.
+const INTER_VAR_TTF =
+  'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf';
 const RESVG_WASM =
   'https://cdn.jsdelivr.net/npm/@resvg/resvg-wasm@2.6.0/index_bg.wasm';
 
@@ -54,17 +48,16 @@ async function ensureWasm() {
 
 async function getInterFonts() {
   if (!interFonts) {
-    const [r400, r600, r700, r800] = await Promise.all([
-      fetch(INTER_400).then((r) => r.arrayBuffer()),
-      fetch(INTER_600).then((r) => r.arrayBuffer()),
-      fetch(INTER_700).then((r) => r.arrayBuffer()),
-      fetch(INTER_800).then((r) => r.arrayBuffer()),
-    ]);
+    const buf = await fetch(INTER_VAR_TTF).then((r) => {
+      if (!r.ok) throw new Error(`Font fetch failed: ${r.status}`);
+      return r.arrayBuffer();
+    });
+    // Reuse the same variable font buffer for all weights Satori asks for.
     interFonts = [
-      { name: 'Inter', weight: 400, style: 'normal', data: r400 },
-      { name: 'Inter', weight: 600, style: 'normal', data: r600 },
-      { name: 'Inter', weight: 700, style: 'normal', data: r700 },
-      { name: 'Inter', weight: 800, style: 'normal', data: r800 },
+      { name: 'Inter', weight: 400, style: 'normal', data: buf },
+      { name: 'Inter', weight: 600, style: 'normal', data: buf },
+      { name: 'Inter', weight: 700, style: 'normal', data: buf },
+      { name: 'Inter', weight: 800, style: 'normal', data: buf },
     ];
   }
   return interFonts;
