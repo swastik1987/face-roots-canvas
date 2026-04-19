@@ -140,10 +140,31 @@ const Capture = () => {
     const lms = result.faceLandmarks[0];
     const xs = lms.map((l) => l.x),
       ys = lms.map((l) => l.y);
-    const faceArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    const minNX = Math.min(...xs), maxNX = Math.max(...xs);
+    const minNY = Math.min(...ys), maxNY = Math.max(...ys);
+    const faceArea = (maxNX - minNX) * (maxNY - minNY);
+
+    if (faceArea > MAX_FACE_RATIO) {
+      setHasFace(false);
+      setAlignmentHint("Move back a little");
+      stableStartRef.current = null;
+      setStableProgress(0);
+      rafRef.current = requestAnimationFrame(runDetection);
+      return;
+    }
+
     if (faceArea < MIN_FACE_RATIO) {
       setHasFace(false);
       setAlignmentHint("Move closer");
+      stableStartRef.current = null;
+      setStableProgress(0);
+      rafRef.current = requestAnimationFrame(runDetection);
+      return;
+    }
+
+    if (!bboxInsideOval(minNX, minNY, maxNX, maxNY)) {
+      setHasFace(true);
+      setAlignmentHint("Fit your whole face in the oval");
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
