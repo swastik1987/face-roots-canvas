@@ -170,21 +170,24 @@ function glowBlob(opts: {
   color: string;
   size: number;
 }): object {
+  const style: Record<string, string | number> = {
+    position: 'absolute',
+    width: opts.size,
+    height: opts.size,
+    borderRadius: '50%',
+    background: opts.color,
+    display: 'flex',
+  };
+
+  if (opts.top != null) style.top = opts.top;
+  if (opts.bottom != null) style.bottom = opts.bottom;
+  if (opts.left != null) style.left = opts.left;
+  if (opts.right != null) style.right = opts.right;
+
   return {
     type: 'div',
     props: {
-      style: {
-        position: 'absolute',
-        top:    opts.top    != null ? opts.top    : undefined,
-        bottom: opts.bottom != null ? opts.bottom : undefined,
-        left:   opts.left   != null ? opts.left   : undefined,
-        right:  opts.right  != null ? opts.right  : undefined,
-        width: opts.size,
-        height: opts.size,
-        borderRadius: '50%',
-        background: opts.color,
-        display: 'flex',
-      },
+      style,
     },
   };
 }
