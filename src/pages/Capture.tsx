@@ -21,6 +21,7 @@ import { CheckCircle2, Loader2, RotateCcw } from "lucide-react";
 import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from "@/lib/face/detector";
 import { extractPose } from "@/lib/face/pose";
 import { cropAndUploadFeatures, loadImageFromBlob } from "@/lib/face/uploadCrops";
+import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
 import { useFaceStore } from "@/stores/faceStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -348,6 +349,8 @@ const Capture = () => {
         selfPerson = np;
       }
 
+      const newFaceImageIds: string[] = [];
+
       for (const frame of Object.values(frames)) {
         if (!frame) continue;
         const path = `${user.id}/self/${frame.angle}_${Date.now()}.jpg`;
@@ -369,6 +372,8 @@ const Capture = () => {
           .select("id")
           .single();
         if (ie) throw ie;
+
+        newFaceImageIds.push(imgRow.id);
 
         const lms = frame.landmarkResult;
         const matrices = lms.facialTransformationMatrixes;
@@ -393,9 +398,19 @@ const Capture = () => {
         }
       }
 
+      // Replace flow: purge any prior self photos + invalidate prior analyses.
+      if (newFaceImageIds.length) {
+        await replacePersonFaceImages({
+          userId: user.id,
+          personId: selfPerson.id,
+          keepFaceImageIds: newFaceImageIds,
+        });
+      }
+
       clearFrames();
       captureEvent("capture_done");
       await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });
+      await queryClient.invalidateQueries({ queryKey: ["self-thumbnail"] });
       setStep("done");
     } catch (err) {
       console.error("[FaceBlame] Upload failed", err);

@@ -14,7 +14,7 @@ import { captureException } from "../_shared/sentry.ts";
 import { MatchFeaturesInput, parseJsonBody } from "../_shared/schemas.ts";
 
 const TOP_N = 5; // winner + 4 runners-up
-const EMBEDDING_DIM = 768; // CLIP ViT-L/14
+const EMBEDDING_DIM = 512; // client-side CLIP ViT-B/32 (Transformers.js)
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);

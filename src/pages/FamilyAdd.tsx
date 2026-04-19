@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw, Pencil } from "lucide-react";
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 import { cropAndUploadFeatures } from "@/lib/face/uploadCrops";
+import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
 import { normalizeToPortrait } from "@/lib/face/normalize";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -122,6 +123,10 @@ const FamilyAdd = () => {
   const [name, setName] = useState("");
   const [relationTag, setRelationTag] = useState(searchParams.get("tag") ?? "");
   const [showCropDialog, setShowCropDialog] = useState(false);
+  // When present, we're replacing the photo of an existing family member
+  // instead of adding a new one. Skips the persons insert and re-uses the
+  // existing row; the replace helper purges the old face_images + crops.
+  const replacePersonId = searchParams.get("person_id");
 
   // Cleanup object URLs on unmount
   useEffect(() => {
@@ -129,6 +134,25 @@ const FamilyAdd = () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  // Pre-fill name/relationship when re-uploading for an existing person.
+  useEffect(() => {
+    if (!replacePersonId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("persons")
+        .select("display_name, relationship_tag")
+        .eq("id", replacePersonId)
+        .maybeSingle();
+      if (cancelled || !data) return;
+      setName(data.display_name ?? "");
+      setRelationTag(data.relationship_tag ?? "");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [replacePersonId]);
 
   // ── File pick + detection ──────────────────────────────────────────────────
 
@@ -209,19 +233,37 @@ const FamilyAdd = () => {
       const rel = RELATIONSHIP_OPTIONS.find((r) => r.tag === relationTag);
       const generation = rel?.generation ?? 0;
 
-      // Create person row
-      const { data: person, error: pe } = await supabase
-        .from("persons")
-        .insert({
-          owner_user_id: user.id,
-          display_name: name.trim(),
-          relationship_tag: relationTag,
-          generation,
-          is_self: false,
-        })
-        .select("id")
-        .single();
-      if (pe) throw pe;
+      // Replace mode: re-use the existing person row; otherwise insert a new one.
+      let person: { id: string };
+      if (replacePersonId) {
+        const { data: updated, error: ue } = await supabase
+          .from("persons")
+          .update({
+            display_name: name.trim(),
+            relationship_tag: relationTag,
+            generation,
+          })
+          .eq("id", replacePersonId)
+          .eq("owner_user_id", user.id)
+          .select("id")
+          .single();
+        if (ue) throw ue;
+        person = updated;
+      } else {
+        const { data: inserted, error: pe } = await supabase
+          .from("persons")
+          .insert({
+            owner_user_id: user.id,
+            display_name: name.trim(),
+            relationship_tag: relationTag,
+            generation,
+            is_self: false,
+          })
+          .select("id")
+          .single();
+        if (pe) throw pe;
+        person = inserted;
+      }
 
       // 1. Detect landmarks directly on the final normalized crop blob
       const normalizedCropBlob = await normalizeToPortrait(cropBlob);
@@ -281,8 +323,16 @@ const FamilyAdd = () => {
       }
       URL.revokeObjectURL(croppedImgForDetect.src);
 
+      // Purge any prior images for this person + mark analyses stale.
+      await replacePersonFaceImages({
+        userId: user.id,
+        personId: person.id,
+        keepFaceImageIds: [imgRow.id],
+      });
+
       // Invalidate persons cache so Home re-fetches immediately
       await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });
+      await queryClient.invalidateQueries({ queryKey: ["family-thumbnail"] });
 
       setPhase("done");
     } catch (err) {

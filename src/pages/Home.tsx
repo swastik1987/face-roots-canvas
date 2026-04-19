@@ -9,6 +9,7 @@ import { createSignedUrlSafe } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import { captureEvent } from "@/lib/analytics";
 import { ensureAllCropsUploaded, cropAndUploadFeatures } from "@/lib/face/uploadCrops";
+import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
 import { normalizeToPortrait } from "@/lib/face/normalize";
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 import PhotoEditSheet from "@/components/PhotoEditSheet";
@@ -243,13 +244,6 @@ const Home = () => {
       if (!user || !cropPersonId) return;
 
       try {
-        // Capture existing front photos so we can replace them after the new upload succeeds.
-        const { data: previousFrontImages } = await supabase
-          .from("face_images")
-          .select("id, storage_path")
-          .eq("person_id", cropPersonId)
-          .eq("angle", "front");
-
         const normalizedBlob = await normalizeToPortrait(blob);
 
         const path = `${user.id}/${cropPersonId}/cropped_${Date.now()}.jpg`;
@@ -313,34 +307,12 @@ const Home = () => {
         }
         URL.revokeObjectURL(croppedImgForDetect.src);
 
-        // Remove older front images so analysis and UI always use the newest portrait.
-        const oldFrontImages = (previousFrontImages ?? []).filter((img) => img.id !== inserted.id);
-        if (oldFrontImages.length) {
-          const oldIds = oldFrontImages.map((img) => img.id);
-          const oldPaths = oldFrontImages.map((img) => img.storage_path).filter(Boolean);
-
-          // Best-effort storage cleanup for raw images.
-          if (oldPaths.length) {
-            await supabase.storage.from("face-images-raw").remove(oldPaths);
-          }
-
-          // Best-effort storage cleanup for per-image feature crops.
-          const cropPaths: string[] = [];
-          for (const imageId of oldIds) {
-            const imagePrefix = `${user.id}/${cropPersonId}/${imageId}`;
-            const { data: crops } = await supabase.storage.from("feature-crops").list(imagePrefix);
-            if (!crops?.length) continue;
-            for (const file of crops) {
-              cropPaths.push(`${imagePrefix}/${file.name}`);
-            }
-          }
-          if (cropPaths.length) {
-            await supabase.storage.from("feature-crops").remove(cropPaths);
-          }
-
-          // DB delete cascades landmarks/embeddings tied to old front images.
-          await supabase.from("face_images").delete().in("id", oldIds);
-        }
+        // Purge any prior photos for this person + invalidate prior analyses.
+        await replacePersonFaceImages({
+          userId: user.id,
+          personId: cropPersonId,
+          keepFaceImageIds: [inserted.id],
+        });
 
         // Invalidate thumbnail caches so they refresh
         await queryClient.invalidateQueries({ queryKey: ["self-thumbnail"] });
@@ -358,8 +330,11 @@ const Home = () => {
   const handleFamilyReupload = useCallback(
     (file: File) => {
       if (!editPerson) return;
-      // Navigate to family add page with person_id for replacement
-      navigate(`/family/add?tag=${editPerson.relationship_tag}`);
+      // person_id tells FamilyAdd to replace into the existing row instead
+      // of inserting a fresh one (which would orphan the old person).
+      navigate(
+        `/family/add?tag=${editPerson.relationship_tag}&person_id=${editPerson.id}`,
+      );
     },
     [editPerson, navigate],
   );

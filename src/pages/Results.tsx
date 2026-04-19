@@ -26,6 +26,7 @@ import { supabase } from '@/lib/supabase';
 import { createSignedUrlSafe } from '@/lib/storage';
 import FaceSilhouette, { type FeatureType } from '@/components/results/FaceSilhouette';
 import { FeatureCard, type FeatureCardData } from '@/components/results/FeatureCard';
+import StaleAnalysisBanner from '@/components/results/StaleAnalysisBanner';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,7 @@ async function fetchResultsData(analysisId: string) {
   // 1. Analysis row
   const { data: analysis, error: aErr } = await supabase
     .from('analyses')
-    .select('id, user_id, self_person_id, status, model_versions')
+    .select('id, user_id, self_person_id, status, model_versions, is_stale')
     .eq('id', analysisId)
     .single();
   if (aErr || !analysis) throw new Error(aErr?.message ?? 'Analysis not found');
@@ -252,6 +253,7 @@ export default function Results() {
 
   return (
     <div className="flex flex-col items-center min-h-screen pb-28">
+      {data.analysis.is_stale && <StaleAnalysisBanner />}
       {/* ── Hero ────────────────────────────────────────────────────────────── */}
       <div className="w-full radial-glow pt-10 pb-6 px-6 flex flex-col items-center gap-2">
         <motion.h1

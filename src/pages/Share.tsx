@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Download, Share2, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { createSignedUrlSafe } from '@/lib/storage';
+import StaleAnalysisBanner from '@/components/results/StaleAnalysisBanner';
 import { useToast } from '@/hooks/use-toast';
 import { captureEvent } from '@/lib/analytics';
 
@@ -34,6 +35,7 @@ export default function SharePage() {
   const { toast } = useToast();
 
   const [state, setState] = useState<CardState>({ phase: 'loading' });
+  const [isStale, setIsStale] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
@@ -49,7 +51,7 @@ export default function SharePage() {
       // 1. Fetch analysis to check if card has already been rendered
       const { data: analysis, error: aErr } = await supabase
         .from('analyses')
-        .select('id, status, card_storage_path')
+        .select('id, status, card_storage_path, is_stale')
         .eq('id', id)
         .single();
 
@@ -57,6 +59,8 @@ export default function SharePage() {
         setState({ phase: 'error', message: 'Analysis not found.' });
         return;
       }
+
+      setIsStale(Boolean(analysis.is_stale));
 
       // 2a. Card already exists — create a fresh signed URL
       if (analysis.card_storage_path) {
@@ -207,6 +211,8 @@ export default function SharePage() {
       >
         Your Legacy Card
       </motion.h1>
+
+      {isStale && <StaleAnalysisBanner />}
 
       <AnimatePresence mode="wait">
         {/* ── Loading / Rendering ──────────────────────────────────────── */}
