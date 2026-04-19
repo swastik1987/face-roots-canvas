@@ -40,7 +40,8 @@ const MAGENTA = '#d946ef';
 const BG      = '#0a0a0f';
 
 /** Convert snake_case feature type to display label. */
-function formatFeature(type: string): string {
+function formatFeature(type: string | null | undefined): string {
+  if (!type) return 'Feature';
   return type
     .replace(/_left|_right/g, '')
     .replace(/_/g, ' ')
