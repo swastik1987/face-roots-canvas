@@ -656,55 +656,90 @@ function OvalOverlay({ progress, hasFace, captured }: { progress: number; hasFac
       {/* Dim outside the oval */}
       <rect width="260" height="340" fill="rgba(0,0,0,0.35)" mask="url(#oval-mask)" />
 
+  // Feature line color intensity based on lock/face state
+  const featureOpacity = captured ? 1 : hasFace ? 0.6 : 0.35;
+  const EYE_COLOR = "#22d3ee"; // cyan
+  const NOSE_COLOR = "#e879f9"; // fuchsia
+  const MOUTH_COLOR = "#fbbf24"; // amber
+  const AXIS_COLOR = "rgba(255,255,255,0.4)";
+  const THIRDS_COLOR = "rgba(255,255,255,0.15)";
+
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 260 340" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <mask id="oval-mask">
+          <rect width="260" height="340" fill="white" />
+          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="black" />
+        </mask>
+        <clipPath id="oval-clip">
+          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} />
+        </clipPath>
+      </defs>
+
+      {/* Dim outside the oval */}
+      <rect width="260" height="340" fill="rgba(0,0,0,0.35)" mask="url(#oval-mask)" />
+
       {/* Inner alignment grid — clipped to oval */}
       <g clipPath="url(#oval-clip)">
-        {/* Vertical centre (nose axis) */}
-        <line x1={cx} y1={top} x2={cx} y2={cy + ry} stroke={gridColor} strokeWidth="0.75" strokeDasharray="3 4" />
-        {/* Eye line */}
-        <line x1={left} y1={eyeY} x2={right} y2={eyeY} stroke={gridColor} strokeWidth="0.75" strokeDasharray="3 4" />
-        {/* Nose-tip line (shorter) */}
-        <line
-          x1={cx - rx * 0.4}
-          y1={noseY}
-          x2={cx + rx * 0.4}
-          y2={noseY}
-          stroke={gridColor}
-          strokeWidth="0.75"
-          strokeDasharray="2 3"
-        />
-        {/* Mouth line */}
-        <line
-          x1={cx - rx * 0.55}
-          y1={mouthY}
-          x2={cx + rx * 0.55}
-          y2={mouthY}
-          stroke={gridColor}
-          strokeWidth="0.75"
-          strokeDasharray="3 4"
-        />
-        {/* Rule-of-thirds vertical thirds */}
+        {/* Vertical centre (nose axis) — neutral white */}
+        <line x1={cx} y1={top} x2={cx} y2={cy + ry} stroke={AXIS_COLOR} strokeWidth="0.6" strokeDasharray="3 4" />
+
+        {/* Rule-of-thirds vertical thirds — very faint */}
         <line
           x1={left + (rx * 2) / 3}
           y1={top}
           x2={left + (rx * 2) / 3}
           y2={cy + ry}
-          stroke={gridColor}
+          stroke={THIRDS_COLOR}
           strokeWidth="0.4"
           strokeDasharray="1 4"
-          opacity="0.7"
         />
         <line
           x1={left + (rx * 4) / 3}
           y1={top}
           x2={left + (rx * 4) / 3}
           y2={cy + ry}
-          stroke={gridColor}
+          stroke={THIRDS_COLOR}
           strokeWidth="0.4"
           strokeDasharray="1 4"
-          opacity="0.7"
         />
+
+        {/* Eye line — cyan */}
+        <g opacity={featureOpacity}>
+          <line x1={left} y1={eyeY} x2={right} y2={eyeY} stroke={EYE_COLOR} strokeWidth="1" strokeDasharray="4 3" />
+          <circle cx={right - 3} cy={eyeY} r="2" fill={EYE_COLOR} />
+        </g>
+
+        {/* Nose-tip line — fuchsia (shorter) */}
+        <g opacity={featureOpacity}>
+          <line
+            x1={cx - rx * 0.4}
+            y1={noseY}
+            x2={cx + rx * 0.4}
+            y2={noseY}
+            stroke={NOSE_COLOR}
+            strokeWidth="1"
+            strokeDasharray="3 3"
+          />
+          <circle cx={cx + rx * 0.4} cy={noseY} r="2" fill={NOSE_COLOR} />
+        </g>
+
+        {/* Mouth line — amber */}
+        <g opacity={featureOpacity}>
+          <line
+            x1={cx - rx * 0.55}
+            y1={mouthY}
+            x2={cx + rx * 0.55}
+            y2={mouthY}
+            stroke={MOUTH_COLOR}
+            strokeWidth="1"
+            strokeDasharray="4 3"
+          />
+          <circle cx={cx + rx * 0.55} cy={mouthY} r="2" fill={MOUTH_COLOR} />
+        </g>
+
         {/* Centre crosshair dot */}
-        <circle cx={cx} cy={eyeY} r="1.4" fill={gridColor} />
+        <circle cx={cx} cy={eyeY} r="1.4" fill={AXIS_COLOR} />
       </g>
 
       {/* Static oval border */}
