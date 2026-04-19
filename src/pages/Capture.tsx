@@ -32,9 +32,33 @@ import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 type Step = "loading" | "detecting_front" | "captured_front" | "uploading" | "done" | "error";
 
 const STABLE_MS = 1200;
-const MIN_FACE_RATIO = 0.18;
+const MIN_FACE_RATIO = 0.11;
+const MAX_FACE_RATIO = 0.32;
 const YAW_MAX = 8;
 const PITCH_MAX = 8;
+
+// Oval region in normalized video coords (matches SVG oval centered, ~0.55w × 0.78h)
+const OVAL_NORM = { cx: 0.5, cy: 0.5, rx: 0.275, ry: 0.39 };
+
+function bboxInsideOval(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): boolean {
+  const corners = [
+    [minX, minY],
+    [maxX, minY],
+    [minX, maxY],
+    [maxX, maxY],
+  ];
+  for (const [x, y] of corners) {
+    const dx = (x - OVAL_NORM.cx) / OVAL_NORM.rx;
+    const dy = (y - OVAL_NORM.cy) / OVAL_NORM.ry;
+    if (dx * dx + dy * dy > 1) return false;
+  }
+  return true;
+}
 
 // Output canvas dimensions (matches oval portrait aspect ≈ 3:4)
 const OUTPUT_W = 768;
@@ -116,10 +140,31 @@ const Capture = () => {
     const lms = result.faceLandmarks[0];
     const xs = lms.map((l) => l.x),
       ys = lms.map((l) => l.y);
-    const faceArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    const minNX = Math.min(...xs), maxNX = Math.max(...xs);
+    const minNY = Math.min(...ys), maxNY = Math.max(...ys);
+    const faceArea = (maxNX - minNX) * (maxNY - minNY);
+
+    if (faceArea > MAX_FACE_RATIO) {
+      setHasFace(false);
+      setAlignmentHint("Move back a little");
+      stableStartRef.current = null;
+      setStableProgress(0);
+      rafRef.current = requestAnimationFrame(runDetection);
+      return;
+    }
+
     if (faceArea < MIN_FACE_RATIO) {
       setHasFace(false);
       setAlignmentHint("Move closer");
+      stableStartRef.current = null;
+      setStableProgress(0);
+      rafRef.current = requestAnimationFrame(runDetection);
+      return;
+    }
+
+    if (!bboxInsideOval(minNX, minNY, maxNX, maxNY)) {
+      setHasFace(true);
+      setAlignmentHint("Fit your whole face in the oval");
       stableStartRef.current = null;
       setStableProgress(0);
       rafRef.current = requestAnimationFrame(runDetection);
@@ -398,13 +443,13 @@ const Capture = () => {
           audio={false}
           videoConstraints={{
             facingMode: "user",
-            width: { ideal: 768 },
-            height: { ideal: 1024 },
-            aspectRatio: 3 / 4,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            aspectRatio: 16 / 9,
           }}
           screenshotFormat="image/jpeg"
           screenshotQuality={0.92}
-          className="absolute inset-0 w-full h-full object-cover"
+          className="absolute inset-0 w-full h-full object-contain bg-black"
           onUserMediaError={() => setCameraError(true)}
           mirrored
         />
@@ -596,6 +641,14 @@ function OvalOverlay({ progress, hasFace, captured }: { progress: number; hasFac
   const noseY = top + ry * 2 * 0.58; // ~58%
   const mouthY = top + ry * 2 * 0.72; // ~72%
 
+  // Feature line color intensity based on lock/face state
+  const featureOpacity = captured ? 1 : hasFace ? 0.6 : 0.35;
+  const EYE_COLOR = "#22d3ee"; // cyan
+  const NOSE_COLOR = "#e879f9"; // fuchsia
+  const MOUTH_COLOR = "#fbbf24"; // amber
+  const AXIS_COLOR = "rgba(255,255,255,0.4)";
+  const THIRDS_COLOR = "rgba(255,255,255,0.15)";
+
   return (
     <svg width="100%" height="100%" viewBox="0 0 260 340" preserveAspectRatio="xMidYMid meet">
       <defs>
@@ -613,53 +666,65 @@ function OvalOverlay({ progress, hasFace, captured }: { progress: number; hasFac
 
       {/* Inner alignment grid — clipped to oval */}
       <g clipPath="url(#oval-clip)">
-        {/* Vertical centre (nose axis) */}
-        <line x1={cx} y1={top} x2={cx} y2={cy + ry} stroke={gridColor} strokeWidth="0.75" strokeDasharray="3 4" />
-        {/* Eye line */}
-        <line x1={left} y1={eyeY} x2={right} y2={eyeY} stroke={gridColor} strokeWidth="0.75" strokeDasharray="3 4" />
-        {/* Nose-tip line (shorter) */}
-        <line
-          x1={cx - rx * 0.4}
-          y1={noseY}
-          x2={cx + rx * 0.4}
-          y2={noseY}
-          stroke={gridColor}
-          strokeWidth="0.75"
-          strokeDasharray="2 3"
-        />
-        {/* Mouth line */}
-        <line
-          x1={cx - rx * 0.55}
-          y1={mouthY}
-          x2={cx + rx * 0.55}
-          y2={mouthY}
-          stroke={gridColor}
-          strokeWidth="0.75"
-          strokeDasharray="3 4"
-        />
-        {/* Rule-of-thirds vertical thirds */}
+        {/* Vertical centre (nose axis) — neutral white */}
+        <line x1={cx} y1={top} x2={cx} y2={cy + ry} stroke={AXIS_COLOR} strokeWidth="0.6" strokeDasharray="3 4" />
+
+        {/* Rule-of-thirds vertical thirds — very faint */}
         <line
           x1={left + (rx * 2) / 3}
           y1={top}
           x2={left + (rx * 2) / 3}
           y2={cy + ry}
-          stroke={gridColor}
+          stroke={THIRDS_COLOR}
           strokeWidth="0.4"
           strokeDasharray="1 4"
-          opacity="0.7"
         />
         <line
           x1={left + (rx * 4) / 3}
           y1={top}
           x2={left + (rx * 4) / 3}
           y2={cy + ry}
-          stroke={gridColor}
+          stroke={THIRDS_COLOR}
           strokeWidth="0.4"
           strokeDasharray="1 4"
-          opacity="0.7"
         />
+
+        {/* Eye line — cyan */}
+        <g opacity={featureOpacity}>
+          <line x1={left} y1={eyeY} x2={right} y2={eyeY} stroke={EYE_COLOR} strokeWidth="1" strokeDasharray="4 3" />
+          <circle cx={right - 3} cy={eyeY} r="2" fill={EYE_COLOR} />
+        </g>
+
+        {/* Nose-tip line — fuchsia (shorter) */}
+        <g opacity={featureOpacity}>
+          <line
+            x1={cx - rx * 0.4}
+            y1={noseY}
+            x2={cx + rx * 0.4}
+            y2={noseY}
+            stroke={NOSE_COLOR}
+            strokeWidth="1"
+            strokeDasharray="3 3"
+          />
+          <circle cx={cx + rx * 0.4} cy={noseY} r="2" fill={NOSE_COLOR} />
+        </g>
+
+        {/* Mouth line — amber */}
+        <g opacity={featureOpacity}>
+          <line
+            x1={cx - rx * 0.55}
+            y1={mouthY}
+            x2={cx + rx * 0.55}
+            y2={mouthY}
+            stroke={MOUTH_COLOR}
+            strokeWidth="1"
+            strokeDasharray="4 3"
+          />
+          <circle cx={cx + rx * 0.55} cy={mouthY} r="2" fill={MOUTH_COLOR} />
+        </g>
+
         {/* Centre crosshair dot */}
-        <circle cx={cx} cy={eyeY} r="1.4" fill={gridColor} />
+        <circle cx={cx} cy={eyeY} r="1.4" fill={AXIS_COLOR} />
       </g>
 
       {/* Static oval border */}
