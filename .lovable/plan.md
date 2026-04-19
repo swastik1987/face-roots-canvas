@@ -1,37 +1,37 @@
 
-
 ## Goal
-1. Make the oval guide nearly fill the screen vertically (>80%) so users can easily centre their face.
-2. After auto-capture, show a **preview screen** with the captured face plus **Retake** and **Submit** buttons — only upload on Submit.
+Fix the over-zoomed camera on `/capture`, ensure the full face fits inside the oval before auto-capture triggers, and make the alignment grid lines colored for better visual guidance.
 
-## Changes
+## Root cause
+`react-webcam` is rendered with `object-cover` inside a container, which crops + scales the video to fill the screen — this is why the face appears ~2x zoomed. Combined with `MIN_FACE_RATIO = 0.18` (face must fill 18% of frame), users have to bring their face very close, reinforcing the zoom feel.
 
-### 1. `OvalOverlay` — fill the viewport vertically (`src/pages/Capture.tsx`)
-- Replace the fixed 260×340 SVG with a viewport-responsive oval. Make the SVG container ~92vh tall and width auto-derived from the 3:4 oval aspect (so it scales on any phone).
-- Switch the SVG to `width="100%" height="100%"` filling its container, keep the `viewBox="0 0 260 340"` so all internal grid coordinates stay correct.
-- Container wrapper: `style={{ height: '92vh', aspectRatio: '260/340' }}` centred in the screen, replacing the current fixed-pixel `<div className="relative">`.
-- Remove the `marginTop: '-5%'` offset; centre it cleanly with flex.
-- Net effect: oval fills >80% of the vertical screen, the alignment grid scales with it, the existing capture math (which uses video-pixel coords + landmarks) is unaffected.
+## Changes (single file: `src/pages/Capture.tsx`)
 
-### 2. New `captured_front` review step
-Today `captured_front` auto-advances to `uploading` after 900 ms. Replace that with a manual review screen:
+### 1. Remove the camera "zoom" effect
+- Switch the `<Webcam>` element from `object-cover` to `object-contain` so the full sensor frame is visible without cropping.
+- Use `videoConstraints` of `{ width: 1280, height: 720, facingMode: 'user', aspectRatio: 16/9 }` to lock 1:1 (no digital zoom) and let the browser pick the native resolution.
+- Center the video with flex; let letterboxing happen naturally on portrait phones rather than cropping.
 
-- Keep capture logic identical (still cropped to 768×1024 oval JPEG and stored in `useFaceStore.frames.front`).
-- After `setStep('captured_front')`, **do not** schedule the timeout to `'uploading'`.
-- Render a full-screen review overlay when `step === 'captured_front'`:
-  - Show the captured oval JPEG (`frames.front.imageDataUrl`) inside a matching oval frame (reuse the same SVG clipPath approach as `FaceSilhouette`) so the user sees exactly what was captured.
-  - Two buttons at the bottom:
-    - **Retake** (ghost / outline): calls existing `retry()` → clears frames, returns to `detecting_front`.
-    - **Submit** (primary `btn-gradient`): sets `step` to `'uploading'`, which triggers the existing `uploadAllFrames()` effect.
-  - Hide the live camera feed and oval grid overlay while in this review state to avoid visual clutter (use `step === 'detecting_front' || step === 'loading'` to gate those).
-- The success checkmark animation that currently shows during `captured_front` is removed (it now belongs in the post-Submit upload flow which already has its own "Saving your photo…" state).
+### 2. Require the full face inside the oval
+- Lower `MIN_FACE_RATIO` from `0.18` → `0.11` (face must fill ~11% of frame minimum) so users can stand at a comfortable distance.
+- Add an `MAX_FACE_RATIO = 0.32` upper bound — if the face is too big (close to camera), show "Move back" hint and block capture.
+- Add an oval-fit check using the landmark bbox: the face bbox must be **fully contained** within the oval region (computed in normalized video coords matching the SVG oval ~0.55 wide × 0.78 tall, centered). If any of the 4 bbox corners fall outside the oval, set hint to "Fit your whole face in the oval" and block capture.
+- Update `alignmentHint` priority: no-face → too-close → too-small → outside-oval → yaw → pitch → aligned.
 
-### 3. Small copy/polish
-- Top instruction bar gains a `captured_front` branch: "Looks good?" / "Retake or submit to continue."
-- The auto-vibrate and shutter flash on capture remain (they signal the photo was taken).
+### 3. Colored grid lines for guidance
+Replace the current monochrome white grid in `OvalOverlay` with a semantic color palette (matching the landing-page "What you'll discover" inspiration):
+- **Eye line (33%)**: cyan (`#22d3ee`) — "eyes"
+- **Nose line (58%)**: fuchsia (`#e879f9`) — "nose"
+- **Mouth line (72%)**: amber (`#fbbf24`) — "mouth"
+- **Vertical center axis**: soft white (`rgba(255,255,255,0.4)`) — neutral reference
+- **Rule-of-thirds dashed grid**: very faint white (`rgba(255,255,255,0.15)`) — kept subtle so colored feature lines pop
+- Each colored line gets a tiny label dot at the right edge (4px circle in matching color) so the meaning is implicit.
+- When `isLocked` (capture armed), all colored lines brighten to full opacity; when only `hasFace` is true, they sit at 0.6 opacity; idle = 0.35.
+
+### 4. Small copy additions
+- Add new hint strings: `"Move back a little"` (too close) and `"Fit your whole face in the oval"` (bbox outside oval).
 
 ## Out of scope
-- No DB, edge function, or store schema changes (`useFaceStore` already holds the frame; we're just deferring its consumption).
-- No changes to `uploadCrops.ts`, Home, or Results — same blob is uploaded, just on user confirmation.
+- No changes to the cropping/upload pipeline — the captured 768×1024 oval JPEG output is unchanged.
+- No changes to Home, Results, or edge functions.
 - No new dependencies.
-
