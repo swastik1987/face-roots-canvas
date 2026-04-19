@@ -443,13 +443,13 @@ const Capture = () => {
           audio={false}
           videoConstraints={{
             facingMode: "user",
-            width: { ideal: 768 },
-            height: { ideal: 1024 },
-            aspectRatio: 3 / 4,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            aspectRatio: 16 / 9,
           }}
           screenshotFormat="image/jpeg"
           screenshotQuality={0.92}
-          className="absolute inset-0 w-full h-full object-cover"
+          className="absolute inset-0 w-full h-full object-contain bg-black"
           onUserMediaError={() => setCameraError(true)}
           mirrored
         />
