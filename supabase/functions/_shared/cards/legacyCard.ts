@@ -40,7 +40,8 @@ const MAGENTA = '#d946ef';
 const BG      = '#0a0a0f';
 
 /** Convert snake_case feature type to display label. */
-function formatFeature(type: string): string {
+function formatFeature(type: string | null | undefined): string {
+  if (!type) return 'Feature';
   return type
     .replace(/_left|_right/g, '')
     .replace(/_/g, ' ')
@@ -149,7 +150,7 @@ function matchRow(m: CardMatch, idx: number): object {
                     color: 'rgba(255,255,255,0.50)',
                     marginTop: 6,
                   },
-                  children: `like ${m.winnerName}`,
+                  children: `like ${m.winnerName || 'family'}`,
                 },
               },
             ],
@@ -228,7 +229,7 @@ export function buildLegacyCard(data: CardData): object {
                 fontWeight: 800,
                 color: 'rgba(255,255,255,0.80)',
               },
-              children: selfName.charAt(0).toUpperCase(),
+              children: (selfName || 'Y').charAt(0).toUpperCase(),
             },
           },
         },
