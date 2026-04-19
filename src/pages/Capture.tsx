@@ -32,9 +32,33 @@ import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 type Step = "loading" | "detecting_front" | "captured_front" | "uploading" | "done" | "error";
 
 const STABLE_MS = 1200;
-const MIN_FACE_RATIO = 0.18;
+const MIN_FACE_RATIO = 0.11;
+const MAX_FACE_RATIO = 0.32;
 const YAW_MAX = 8;
 const PITCH_MAX = 8;
+
+// Oval region in normalized video coords (matches SVG oval centered, ~0.55w × 0.78h)
+const OVAL_NORM = { cx: 0.5, cy: 0.5, rx: 0.275, ry: 0.39 };
+
+function bboxInsideOval(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): boolean {
+  const corners = [
+    [minX, minY],
+    [maxX, minY],
+    [minX, maxY],
+    [maxX, maxY],
+  ];
+  for (const [x, y] of corners) {
+    const dx = (x - OVAL_NORM.cx) / OVAL_NORM.rx;
+    const dy = (y - OVAL_NORM.cy) / OVAL_NORM.ry;
+    if (dx * dx + dy * dy > 1) return false;
+  }
+  return true;
+}
 
 // Output canvas dimensions (matches oval portrait aspect ≈ 3:4)
 const OUTPUT_W = 768;
