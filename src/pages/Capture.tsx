@@ -641,21 +641,6 @@ function OvalOverlay({ progress, hasFace, captured }: { progress: number; hasFac
   const noseY = top + ry * 2 * 0.58; // ~58%
   const mouthY = top + ry * 2 * 0.72; // ~72%
 
-  return (
-    <svg width="100%" height="100%" viewBox="0 0 260 340" preserveAspectRatio="xMidYMid meet">
-      <defs>
-        <mask id="oval-mask">
-          <rect width="260" height="340" fill="white" />
-          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="black" />
-        </mask>
-        <clipPath id="oval-clip">
-          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} />
-        </clipPath>
-      </defs>
-
-      {/* Dim outside the oval */}
-      <rect width="260" height="340" fill="rgba(0,0,0,0.35)" mask="url(#oval-mask)" />
-
   // Feature line color intensity based on lock/face state
   const featureOpacity = captured ? 1 : hasFace ? 0.6 : 0.35;
   const EYE_COLOR = "#22d3ee"; // cyan
