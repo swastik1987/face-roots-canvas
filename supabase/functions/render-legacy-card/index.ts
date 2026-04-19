@@ -32,14 +32,15 @@ import { buildLegacyCard, type CardMatch } from '../_shared/cards/legacyCard.ts'
 let wasmReady = false;
 let interFonts: { name: string; weight: number; style: string; data: ArrayBuffer }[] | null = null;
 
+// Satori requires TTF/OTF (not WOFF/WOFF2). Use unpkg which serves raw TTF files.
 const INTER_400 =
-  'https://cdn.jsdelivr.net/npm/@fontsource/inter@5/files/inter-latin-400-normal.woff2';
+  'https://cdn.jsdelivr.net/gh/rsms/inter@v4.0/docs/font-files/Inter-Regular.otf';
 const INTER_600 =
-  'https://cdn.jsdelivr.net/npm/@fontsource/inter@5/files/inter-latin-600-normal.woff2';
+  'https://cdn.jsdelivr.net/gh/rsms/inter@v4.0/docs/font-files/Inter-SemiBold.otf';
 const INTER_700 =
-  'https://cdn.jsdelivr.net/npm/@fontsource/inter@5/files/inter-latin-700-normal.woff2';
+  'https://cdn.jsdelivr.net/gh/rsms/inter@v4.0/docs/font-files/Inter-Bold.otf';
 const INTER_800 =
-  'https://cdn.jsdelivr.net/npm/@fontsource/inter@5/files/inter-latin-800-normal.woff2';
+  'https://cdn.jsdelivr.net/gh/rsms/inter@v4.0/docs/font-files/Inter-ExtraBold.otf';
 const RESVG_WASM =
   'https://cdn.jsdelivr.net/npm/@resvg/resvg-wasm@2.6.0/index_bg.wasm';
 
