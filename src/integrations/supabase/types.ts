@@ -20,6 +20,7 @@ export type Database = {
           completed_at: string | null
           error_message: string | null
           id: string
+          is_stale: boolean
           model_versions: Json | null
           self_person_id: string
           started_at: string | null
@@ -31,6 +32,7 @@ export type Database = {
           completed_at?: string | null
           error_message?: string | null
           id?: string
+          is_stale?: boolean
           model_versions?: Json | null
           self_person_id: string
           started_at?: string | null
@@ -42,6 +44,7 @@ export type Database = {
           completed_at?: string | null
           error_message?: string | null
           id?: string
+          is_stale?: boolean
           model_versions?: Json | null
           self_person_id?: string
           started_at?: string | null
