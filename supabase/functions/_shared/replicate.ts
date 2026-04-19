@@ -33,9 +33,37 @@ export async function replicateRun(
   model: string,
   input: ReplicateInput,
   timeoutMs = 90_000,
+  externalSignal?: AbortSignal,
 ): Promise<unknown> {
+  if (!Deno.env.get('REPLICATE_API_TOKEN')) {
+    throw new Error('REPLICATE_API_TOKEN is not configured');
+  }
+
+  const deadline = Date.now() + timeoutMs;
+
+  // Per-fetch timeout: bounds any individual network call so a hung
+  // fetch can't block past the overall deadline.
+  const perFetchMs = 15_000;
+
+  async function fetchWithTimeout(url: string, init: RequestInit = {}) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(`Replicate prediction timed out after ${timeoutMs}ms`);
+
+    const controller = new AbortController();
+    const abortOnExternal = () => controller.abort();
+    externalSignal?.addEventListener('abort', abortOnExternal, { once: true });
+    const timeoutId = setTimeout(() => controller.abort(), Math.min(perFetchMs, remaining));
+
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+      externalSignal?.removeEventListener('abort', abortOnExternal);
+    }
+  }
+
   // Create prediction
-  const createRes = await fetch(`${REPLICATE_API}/predictions`, {
+  const createRes = await fetchWithTimeout(`${REPLICATE_API}/predictions`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ version: model, input }),
@@ -45,17 +73,20 @@ export async function replicateRun(
   }
   const prediction: Prediction = await createRes.json();
 
-  // Poll until done or timeout
-  const deadline = Date.now() + timeoutMs;
   let delay = 500;
 
   while (Date.now() < deadline) {
     await sleep(delay);
     delay = Math.min(delay * 1.5, 5_000);
 
-    const pollRes = await fetch(`${REPLICATE_API}/predictions/${prediction.id}`, {
-      headers: authHeaders(),
-    });
+    let pollRes: Response;
+    try {
+      pollRes = await fetchWithTimeout(`${REPLICATE_API}/predictions/${prediction.id}`, {
+        headers: authHeaders(),
+      });
+    } catch {
+      continue; // retry on network/abort of single poll
+    }
     if (!pollRes.ok) continue;
 
     const p: Prediction = await pollRes.json();

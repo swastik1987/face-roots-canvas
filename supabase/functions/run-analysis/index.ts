@@ -17,7 +17,7 @@ import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { checkRateLimit } from '../_shared/rateLimit.ts';
 import { captureException } from '../_shared/sentry.ts';
-import { RunAnalysisInput } from '../_shared/schemas.ts';
+import { RunAnalysisInput, parseJsonBody } from '../_shared/schemas.ts';
 import { MODEL_VERSIONS } from '../_shared/models.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -48,8 +48,7 @@ Deno.serve(async (req) => {
     // Capture the user's JWT so sibling functions can authenticate as this user
     const userToken = req.headers.get('Authorization')!.replace('Bearer ', '');
 
-    const body = await req.json();
-    const { self_person_id } = RunAnalysisInput.parse(body);
+    const { self_person_id } = await parseJsonBody(req, RunAnalysisInput);
 
     const db = getAdminClient();
 

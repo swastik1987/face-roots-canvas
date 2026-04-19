@@ -12,7 +12,7 @@ import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { replicateRun } from '../_shared/replicate.ts';
 import { captureException } from '../_shared/sentry.ts';
-import { EmbedFeaturesInput } from '../_shared/schemas.ts';
+import { EmbedFeaturesInput, parseJsonBody } from '../_shared/schemas.ts';
 import { MODEL_VERSIONS } from '../_shared/models.ts';
 
 // andreasjansson/clip-features on Replicate — 149M+ runs, ViT-L/14 768-dim
@@ -30,8 +30,7 @@ Deno.serve(async (req) => {
     const user = await requireAuth(req);
     userId = user.id;
 
-    const body = await req.json();
-    const { face_image_id, crops } = EmbedFeaturesInput.parse(body);
+    const { face_image_id, crops } = await parseJsonBody(req, EmbedFeaturesInput);
 
     const db = getAdminClient();
 
@@ -99,12 +98,17 @@ async function embedCrop(
   if (!signed?.signedUrl) throw new Error(`No signed URL for crop ${crop.storage_path}`);
 
   let embedding: number[];
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
   try {
     // andreasjansson/clip-features takes an "inputs" field with newline-separated
     // text/image-URLs. For a single image, pass the URL directly.
-    const output = await replicateRun(CLIP_VERSION, {
-      inputs: signed.signedUrl,
-    });
+    const output = await replicateRun(
+      CLIP_VERSION,
+      { inputs: signed.signedUrl },
+      120_000,
+      controller.signal,
+    );
 
     // Output is an array of { input, embedding } objects
     const results = output as Array<{ input: string; embedding: number[] }> | null;
@@ -123,6 +127,8 @@ async function embedCrop(
       return embedCrop(db, personId, faceImageId, crop, attempt + 1);
     }
     throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   await db.from('feature_embeddings').insert({

@@ -15,7 +15,7 @@
 import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { captureException } from '../_shared/sentry.ts';
-import { MatchFeaturesInput } from '../_shared/schemas.ts';
+import { MatchFeaturesInput, parseJsonBody } from '../_shared/schemas.ts';
 import { MODEL_VERSIONS } from '../_shared/models.ts';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
@@ -51,8 +51,7 @@ Deno.serve(async (req) => {
     const user = await requireAuth(req);
     userId = user.id;
 
-    const body = await req.json();
-    const { analysis_id } = MatchFeaturesInput.parse(body);
+    const { analysis_id } = await parseJsonBody(req, MatchFeaturesInput);
 
     const db = getAdminClient();
     const apiKey = Deno.env.get('GOOGLE_AI_STUDIO_KEY');

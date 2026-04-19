@@ -12,6 +12,7 @@
  */
 
 import { supabase } from "@/lib/supabase";
+import { createSignedUrlSafe } from "@/lib/storage";
 import { cropFeatures } from "./cropper";
 import { FRONT_FEATURES, SIDE_FEATURES, type FeatureType } from "./regions";
 import { embedImage, CLIP_MODEL_VERSION, EMBEDDING_DIM } from "./embedder";
@@ -219,9 +220,11 @@ export async function ensureAllCropsUploaded(onProgress?: (done: number, total: 
       }
 
       // Download the face image from storage
-      const { data: signedData } = await supabase.storage
-        .from("face-images-raw")
-        .createSignedUrl(img.storage_path, 300);
+      const { data: signedData } = await createSignedUrlSafe(
+        "face-images-raw",
+        img.storage_path,
+        300,
+      );
 
       if (!signedData?.signedUrl) {
         console.warn(`[backfill] No signed URL for image ${img.id}`);

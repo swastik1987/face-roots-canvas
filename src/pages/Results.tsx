@@ -23,6 +23,7 @@ import { motion } from 'framer-motion';
 import { Share2, RefreshCw, AlertCircle, Loader2, HelpCircle } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { createSignedUrlSafe } from '@/lib/storage';
 import FaceSilhouette, { type FeatureType } from '@/components/results/FaceSilhouette';
 import { FeatureCard, type FeatureCardData } from '@/components/results/FeatureCard';
 
@@ -107,9 +108,7 @@ async function fetchResultsData(analysisId: string) {
     const batch = paths.slice(i, i + BATCH);
     const results = await Promise.allSettled(
       batch.map(({ key, path }) =>
-        supabase.storage
-          .from('feature-crops')
-          .createSignedUrl(path, 900)
+        createSignedUrlSafe('feature-crops', path, 900)
           .then(({ data }) => ({ key, url: data?.signedUrl ?? null })),
       ),
     );
@@ -142,9 +141,11 @@ async function fetchResultsData(analysisId: string) {
       .maybeSingle()).data;
 
     if (imgRow?.storage_path) {
-      const { data: signedData } = await supabase.storage
-        .from('face-images-raw')
-        .createSignedUrl(imgRow.storage_path, 900);
+      const { data: signedData } = await createSignedUrlSafe(
+        'face-images-raw',
+        imgRow.storage_path,
+        900,
+      );
       selfFaceUrl = signedData?.signedUrl ?? null;
     }
   }

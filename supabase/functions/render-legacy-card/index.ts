@@ -24,7 +24,7 @@ import { initWasm, Resvg } from 'https://esm.sh/@resvg/resvg-wasm@2.6.0';
 import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { captureException } from '../_shared/sentry.ts';
-import { RenderLegacyCardInput } from '../_shared/schemas.ts';
+import { RenderLegacyCardInput, parseJsonBody } from '../_shared/schemas.ts';
 import { buildLegacyCard, type CardMatch } from '../_shared/cards/legacyCard.ts';
 
 // ── Font + WASM caching (per isolate cold-start) ────────────────────────────
@@ -80,8 +80,7 @@ Deno.serve(async (req) => {
     const user = await requireAuth(req);
     userId = user.id;
 
-    const body = await req.json();
-    const { analysis_id } = RenderLegacyCardInput.parse(body);
+    const { analysis_id } = await parseJsonBody(req, RenderLegacyCardInput);
 
     const db = getAdminClient();
 

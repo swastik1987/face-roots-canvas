@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, AlertCircle, HelpCircle, CheckCircle2, XCircle, Trophy } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { createSignedUrlSafe } from '@/lib/storage';
 import { captureEvent } from '@/lib/analytics';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -76,9 +77,11 @@ async function fetchMysteryData(analysisId: string) {
   const cropMap = new Map<string, string>();
   await Promise.all(
     (cropRows ?? []).map(async r => {
-      const { data } = await supabase.storage
-        .from('feature-crops')
-        .createSignedUrl(r.crop_storage_path as string, 900);
+      const { data } = await createSignedUrlSafe(
+        'feature-crops',
+        r.crop_storage_path as string,
+        900,
+      );
       if (data?.signedUrl) cropMap.set(`${r.person_id}::${r.feature_type}`, data.signedUrl);
     }),
   );

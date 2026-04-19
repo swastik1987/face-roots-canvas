@@ -16,6 +16,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Download, Share2, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { createSignedUrlSafe } from '@/lib/storage';
 import { useToast } from '@/hooks/use-toast';
 import { captureEvent } from '@/lib/analytics';
 
@@ -59,9 +60,11 @@ export default function SharePage() {
 
       // 2a. Card already exists — create a fresh signed URL
       if (analysis.card_storage_path) {
-        const { data: signed, error: sErr } = await supabase.storage
-          .from('legacy-cards')
-          .createSignedUrl(analysis.card_storage_path, 900);
+        const { data: signed, error: sErr } = await createSignedUrlSafe(
+          'legacy-cards',
+          analysis.card_storage_path,
+          900,
+        );
 
         if (!sErr && signed?.signedUrl) {
           setState({ phase: 'ready', signedUrl: signed.signedUrl });

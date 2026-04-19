@@ -11,9 +11,10 @@
 import { handleCors, jsonResponse, requireAuth } from "../_shared/cors.ts";
 import { getAdminClient } from "../_shared/supabaseAdmin.ts";
 import { captureException } from "../_shared/sentry.ts";
-import { MatchFeaturesInput } from "../_shared/schemas.ts";
+import { MatchFeaturesInput, parseJsonBody } from "../_shared/schemas.ts";
 
 const TOP_N = 5; // winner + 4 runners-up
+const EMBEDDING_DIM = 768; // CLIP ViT-L/14
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);
@@ -24,8 +25,7 @@ Deno.serve(async (req) => {
     const user = await requireAuth(req);
     userId = user.id;
 
-    const body = await req.json();
-    const { analysis_id } = MatchFeaturesInput.parse(body);
+    const { analysis_id } = await parseJsonBody(req, MatchFeaturesInput);
 
     const db = getAdminClient();
 
@@ -81,6 +81,11 @@ Deno.serve(async (req) => {
           : Array.isArray(embValue)
             ? (embValue as number[])
             : parseVector(String(embValue));
+      if (parsed.length !== EMBEDDING_DIM || parsed.some((n) => !Number.isFinite(n))) {
+        throw new Error(
+          `Invalid embedding for ${row.feature_type}: expected ${EMBEDDING_DIM}-dim finite vector, got dim=${parsed.length}`,
+        );
+      }
       if (!featureMap.has(row.feature_type)) featureMap.set(row.feature_type, []);
       featureMap.get(row.feature_type)!.push(parsed);
     }

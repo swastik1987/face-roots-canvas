@@ -10,7 +10,7 @@ import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { replicateRun } from '../_shared/replicate.ts';
 import { captureException } from '../_shared/sentry.ts';
-import { EmbedFaceInput } from '../_shared/schemas.ts';
+import { EmbedFaceInput, parseJsonBody } from '../_shared/schemas.ts';
 import { MODEL_VERSIONS } from '../_shared/models.ts';
 
 // InsightFace buffalo_l on Replicate
@@ -27,8 +27,7 @@ Deno.serve(async (req) => {
     const user = await requireAuth(req);
     userId = user.id;
 
-    const body = await req.json();
-    const { face_image_id } = EmbedFaceInput.parse(body);
+    const { face_image_id } = await parseJsonBody(req, EmbedFaceInput);
 
     const db = getAdminClient();
 

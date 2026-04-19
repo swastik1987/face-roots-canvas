@@ -5,6 +5,7 @@ import { Plus, User, Loader2, AlertCircle, RefreshCw, CheckCircle2, Clock } from
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/lib/supabase";
+import { createSignedUrlSafe } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import { captureEvent } from "@/lib/analytics";
 import { ensureAllCropsUploaded, cropAndUploadFeatures } from "@/lib/face/uploadCrops";
@@ -167,7 +168,7 @@ const Home = () => {
       const path = images?.[0]?.storage_path;
       if (!path) return null;
 
-      const { data } = await supabase.storage.from("face-images-raw").createSignedUrl(path, 900);
+      const { data } = await createSignedUrlSafe("face-images-raw", path, 900);
       return data?.signedUrl ?? null;
     },
   });
@@ -506,7 +507,7 @@ const Home = () => {
       const path = images?.[0]?.storage_path;
       let url: string | null = null;
       if (path) {
-        const { data } = await supabase.storage.from("face-images-raw").createSignedUrl(path, 900);
+        const { data } = await createSignedUrlSafe("face-images-raw", path, 900);
         url = data?.signedUrl ?? null;
       }
       openEditSheet(person, url);
@@ -776,7 +777,7 @@ function FamilyMemberAvatar({ person }: { person: Person }) {
       const path = images?.[0]?.storage_path;
       if (!path) return null;
 
-      const { data } = await supabase.storage.from("face-images-raw").createSignedUrl(path, 900);
+      const { data } = await createSignedUrlSafe("face-images-raw", path, 900);
       return data?.signedUrl ?? null;
     },
   });

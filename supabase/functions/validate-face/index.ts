@@ -15,7 +15,7 @@ import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { replicateRun } from '../_shared/replicate.ts';
 import { captureException } from '../_shared/sentry.ts';
-import { ValidateFaceInput } from '../_shared/schemas.ts';
+import { ValidateFaceInput, parseJsonBody } from '../_shared/schemas.ts';
 
 const RETINAFACE_VERSION =
   '9e6f9c3d01d5b12c75a3cb9b28dcd5c02e2cbc39f9d9b1e4b88dbf4c4ab8c47';
@@ -37,8 +37,7 @@ Deno.serve(async (req) => {
     const user = await requireAuth(req);
     userId = user.id;
 
-    const body = await req.json();
-    const { face_image_id } = ValidateFaceInput.parse(body);
+    const { face_image_id } = await parseJsonBody(req, ValidateFaceInput);
 
     const db = getAdminClient();
 
