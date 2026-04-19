@@ -32,9 +32,9 @@ import { buildLegacyCard, type CardMatch } from '../_shared/cards/legacyCard.ts'
 let wasmReady = false;
 let interFonts: { name: string; weight: number; style: string; data: ArrayBuffer }[] | null = null;
 
-// Satori requires TTF/OTF (not WOFF/WOFF2). Inter variable font from Google Fonts repo.
-const INTER_VAR_TTF =
-  'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf';
+// Satori requires TTF/OTF (not WOFF/WOFF2). Use a simple static TTF to avoid variable-font parsing issues.
+const INTER_STATIC_TTF =
+  'https://raw.githubusercontent.com/google/fonts/main/ofl/lato/Lato-Regular.ttf';
 const RESVG_WASM =
   'https://cdn.jsdelivr.net/npm/@resvg/resvg-wasm@2.6.0/index_bg.wasm';
 
@@ -48,11 +48,10 @@ async function ensureWasm() {
 
 async function getInterFonts() {
   if (!interFonts) {
-    const buf = await fetch(INTER_VAR_TTF).then((r) => {
+    const buf = await fetch(INTER_STATIC_TTF).then((r) => {
       if (!r.ok) throw new Error(`Font fetch failed: ${r.status}`);
       return r.arrayBuffer();
     });
-    // Reuse the same variable font buffer for all weights Satori asks for.
     interFonts = [
       { name: 'Inter', weight: 400, style: 'normal', data: buf },
       { name: 'Inter', weight: 600, style: 'normal', data: buf },
