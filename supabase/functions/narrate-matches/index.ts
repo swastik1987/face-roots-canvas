@@ -6,8 +6,9 @@
  * Output: { narrated: number }
  *
  * For each feature_match without an llm_verdict:
- *   1. Fetch self's crop + winner's crop from storage (signed URLs → base64)
- *   2. Check verdict_cache (keyed by sha256 of both paths + feature_type)
+ *   1. Fetch self's crop + winner's crop bytes from storage (signed URLs)
+ *   2. Check verdict_cache keyed by sha256(crop bytes) — content-hashed so
+ *      identical bytes hit cache regardless of storage path
  *   3. Cache miss → call Gemini 2.5 Flash with locked system prompt
  *   4. Apply deny-list post-filter; fall back to template if triggered
  *   5. Write verdict to feature_matches + verdict_cache
@@ -163,12 +164,27 @@ interface NarrationParams {
 async function getNarration(p: NarrationParams): Promise<string> {
   const { db, apiKey, featureType, selfPath, winnerPath, similarityPct, relationshipTag } = p;
 
-  // Cache key: sha256 of concatenated paths + feature
-  const cacheKey = await sha256(`${selfPath}::${winnerPath}::${featureType}`);
-  const selfHash = await sha256(selfPath);
-  const winnerHash = await sha256(winnerPath);
+  // Fetch both crop images as base64 first — we need the bytes to hash.
+  // The cache is keyed by sha256 of the actual image bytes, not the storage
+  // path, so re-uploaded crops at the same path (new image, same location)
+  // correctly miss and re-narrate. Conversely, identical bytes at different
+  // paths (e.g. after a replace-on-recapture) correctly hit cache.
+  const [selfImg, winnerImg] = await Promise.all([
+    fetchImageBytes(db, 'feature-crops', selfPath),
+    fetchImageBytes(db, 'feature-crops', winnerPath),
+  ]);
 
-  // Check cache
+  if (!selfImg || !winnerImg) {
+    // Can't hash or narrate without the bytes — fall back to template.
+    return fallbackVerdict(featureType, similarityPct, relationshipTag);
+  }
+
+  const [selfHash, winnerHash] = await Promise.all([
+    sha256Bytes(selfImg.bytes),
+    sha256Bytes(winnerImg.bytes),
+  ]);
+
+  // Check cache by content hash
   const { data: cached } = await db
     .from('verdict_cache')
     .select('verdict')
@@ -179,11 +195,8 @@ async function getNarration(p: NarrationParams): Promise<string> {
 
   if (cached?.verdict) return cached.verdict;
 
-  // Fetch both crop images as base64
-  const [selfB64, winnerB64] = await Promise.all([
-    fetchImageBase64(db, 'feature-crops', selfPath),
-    fetchImageBase64(db, 'feature-crops', winnerPath),
-  ]);
+  const selfB64 = bytesToBase64(selfImg.bytes);
+  const winnerB64 = bytesToBase64(winnerImg.bytes);
 
   // §9.2 User prompt template
   const userPrompt =
@@ -244,7 +257,6 @@ async function getNarration(p: NarrationParams): Promise<string> {
     { onConflict: 'user_crop_hash,winner_crop_hash,feature_type' },
   );
 
-  void cacheKey; // used only structurally above
   return verdict;
 }
 
@@ -253,11 +265,11 @@ function fallbackVerdict(featureType: string, pct: number, relationship: string)
   return `Your ${feature} has a ${pct}% echo of your ${relationship}.`;
 }
 
-async function fetchImageBase64(
+async function fetchImageBytes(
   db: ReturnType<typeof getAdminClient>,
   bucket: string,
   path: string,
-): Promise<string | null> {
+): Promise<{ bytes: Uint8Array } | null> {
   try {
     const { data: signed } = await db.storage
       .from(bucket)
@@ -268,15 +280,25 @@ async function fetchImageBase64(
     if (!res.ok) return null;
 
     const buf = await res.arrayBuffer();
-    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+    return { bytes: new Uint8Array(buf) };
   } catch {
     return null;
   }
 }
 
-async function sha256(text: string): Promise<string> {
-  const encoded = new TextEncoder().encode(text);
-  const hashBuf = await crypto.subtle.digest('SHA-256', encoded);
+function bytesToBase64(bytes: Uint8Array): string {
+  // Chunk the conversion — String.fromCharCode(...x) blows the arg limit on
+  // large arrays (typical crop is 20-60KB, fine as one shot, but be safe).
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+async function sha256Bytes(bytes: Uint8Array): Promise<string> {
+  const hashBuf = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(hashBuf))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');

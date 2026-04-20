@@ -45,3 +45,34 @@ export const SentryErrorBoundary = Sentry.ErrorBoundary;
 
 /** Whether Sentry is configured (used to conditionally render the boundary). */
 export const isSentryEnabled = !!DSN;
+
+/**
+ * Report an exception to Sentry with optional tagged context.
+ * No-op when Sentry isn't configured — still logs to console so local dev
+ * sees the failure.
+ */
+export function captureException(
+  err: unknown,
+  context?: Record<string, unknown>,
+): void {
+  // Always surface to console so non-Sentry environments aren't silent.
+  if (context) {
+    console.error("[sentry]", err, context);
+  } else {
+    console.error("[sentry]", err);
+  }
+  if (!DSN) return;
+  Sentry.captureException(err, context ? { extra: context } : undefined);
+}
+
+/** Record a breadcrumb / informational message. */
+export function captureMessage(
+  message: string,
+  context?: Record<string, unknown>,
+): void {
+  if (!DSN) {
+    console.info("[sentry]", message, context ?? "");
+    return;
+  }
+  Sentry.captureMessage(message, context ? { extra: context } : undefined);
+}

@@ -13,10 +13,25 @@
 
 import { supabase } from "@/lib/supabase";
 import { createSignedUrlSafe } from "@/lib/storage";
+import { captureException, captureMessage } from "@/lib/sentry";
 import { cropFeatures } from "./cropper";
-import { FRONT_FEATURES, SIDE_FEATURES, type FeatureType } from "./regions";
+import { FRONT_FEATURES, type FeatureType } from "./regions";
 import { embedImage, CLIP_MODEL_VERSION, EMBEDDING_DIM } from "./embedder";
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
+
+/**
+ * Aggregate error collected from a batch pipeline. Keeps the first few
+ * causes so downstream callers (toasts, Sentry) get meaningful context
+ * without blowing up log size.
+ */
+export class CropPipelineError extends Error {
+  readonly causes: Error[];
+  constructor(message: string, causes: Error[]) {
+    super(message);
+    this.name = "CropPipelineError";
+    this.causes = causes;
+  }
+}
 
 /**
  * Crop all detectable features from a face image and upload them to the
@@ -41,8 +56,9 @@ export async function cropAndUploadFeatures(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    console.warn("[uploadCrops] No authenticated user — cannot upload crops");
-    return [];
+    const err = new Error("No authenticated user — cannot upload crops");
+    captureException(err, { fn: "cropAndUploadFeatures", personId, faceImageId });
+    throw err;
   }
 
   // Front-only capture: only crop front features.
@@ -53,16 +69,18 @@ export async function cropAndUploadFeatures(
   try {
     crops = await cropFeatures(landmarkResult, source, features);
   } catch (err) {
-    console.warn("[uploadCrops] cropFeatures failed:", err);
-    return [];
+    captureException(err, { fn: "cropFeatures", personId, faceImageId });
+    throw err;
   }
 
   if (!crops.length) {
-    console.warn("[uploadCrops] No crops produced");
-    return [];
+    const err = new Error("No crops produced from landmarks");
+    captureException(err, { fn: "cropAndUploadFeatures", personId, faceImageId });
+    throw err;
   }
 
   const uploaded: Array<{ feature_type: string; storage_path: string }> = [];
+  const failures: Error[] = [];
 
   // Upload each crop in parallel (they're small PNGs)
   // Path: {userId}/{personId}/{faceImageId}/{featureType}.png
@@ -76,13 +94,17 @@ export async function cropAndUploadFeatures(
         .upload(cropPath, crop.blob, { contentType: "image/png", upsert: true });
 
       if (error) {
-        console.warn(`[uploadCrops] Upload failed for ${cropPath}:`, error.message);
+        const err = new Error(`Upload failed for ${cropPath}: ${error.message}`);
+        captureException(err, { fn: "uploadCrop", cropPath, featureType: crop.featureType });
+        failures.push(err);
         return null;
       }
 
       return { feature_type: crop.featureType, storage_path: cropPath };
     } catch (err) {
-      console.warn(`[uploadCrops] Upload error for ${cropPath}:`, err);
+      const wrapped = err instanceof Error ? err : new Error(String(err));
+      captureException(wrapped, { fn: "uploadCrop", cropPath, featureType: crop.featureType });
+      failures.push(wrapped);
       return null;
     }
   });
@@ -92,7 +114,22 @@ export async function cropAndUploadFeatures(
     if (r) uploaded.push(r);
   }
 
-  console.log(`[uploadCrops] Uploaded ${uploaded.length}/${crops.length} feature crops`);
+  // If every crop failed, this is a hard error — surface it.
+  if (uploaded.length === 0 && failures.length > 0) {
+    throw new CropPipelineError(
+      `All ${failures.length} crop uploads failed`,
+      failures,
+    );
+  }
+
+  // Partial failure — report to Sentry but don't block the caller.
+  if (failures.length > 0) {
+    captureMessage(
+      `cropAndUploadFeatures partial failure: ${uploaded.length}/${crops.length} uploaded`,
+      { personId, faceImageId, failedCount: failures.length },
+    );
+  }
+
   return uploaded;
 }
 
@@ -143,8 +180,9 @@ export async function ensureAllCropsUploaded(onProgress?: (done: number, total: 
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    console.warn("[backfill] No authenticated user");
-    return 0;
+    const err = new Error("No authenticated user for backfill");
+    captureException(err, { fn: "ensureAllCropsUploaded" });
+    throw err;
   }
 
   // Fetch all this user's persons
@@ -204,7 +242,7 @@ export async function ensureAllCropsUploaded(onProgress?: (done: number, total: 
         .maybeSingle();
 
       if (!lmRow?.landmarks_json) {
-        console.warn(`[backfill] No landmarks for image ${img.id} — skipping`);
+        captureMessage("backfill: missing landmarks — skipping image", { imageId: img.id });
         processed++;
         continue;
       }
@@ -214,20 +252,23 @@ export async function ensureAllCropsUploaded(onProgress?: (done: number, total: 
       };
 
       if (!stored.landmarks?.length) {
-        console.warn(`[backfill] Empty landmarks for image ${img.id}`);
+        captureMessage("backfill: empty landmarks — skipping image", { imageId: img.id });
         processed++;
         continue;
       }
 
       // Download the face image from storage
-      const { data: signedData } = await createSignedUrlSafe(
+      const { data: signedData, error: signErr } = await createSignedUrlSafe(
         "face-images-raw",
         img.storage_path,
         300,
       );
 
       if (!signedData?.signedUrl) {
-        console.warn(`[backfill] No signed URL for image ${img.id}`);
+        captureException(
+          signErr ?? new Error("No signed URL for face image"),
+          { fn: "backfill.signedUrl", imageId: img.id },
+        );
         processed++;
         continue;
       }
@@ -235,8 +276,8 @@ export async function ensureAllCropsUploaded(onProgress?: (done: number, total: 
       let imgEl: HTMLImageElement;
       try {
         imgEl = await loadImageFromSignedUrl(signedData.signedUrl);
-      } catch {
-        console.warn(`[backfill] Failed to load image ${img.id}`);
+      } catch (err) {
+        captureException(err, { fn: "backfill.loadImage", imageId: img.id });
         processed++;
         continue;
       }
@@ -259,9 +300,8 @@ export async function ensureAllCropsUploaded(onProgress?: (done: number, total: 
 
       try {
         uploadedCrops = await cropAndUploadFeatures(img.person_id, img.id, imgEl, mockResult, angle);
-        console.log(`[backfill] Image ${img.id}: uploaded ${uploadedCrops.length} crops`);
       } catch (err) {
-        console.warn(`[backfill] Crop failed for image ${img.id}:`, err);
+        captureException(err, { fn: "backfill.cropAndUpload", imageId: img.id });
         processed++;
         continue;
       }
@@ -288,10 +328,15 @@ export async function ensureAllCropsUploaded(onProgress?: (done: number, total: 
           }
 
           // Download the crop from storage to get the blob
-          const { data: cropBlob } = await supabase.storage.from("feature-crops").download(crop.storage_path);
+          const { data: cropBlob, error: dlErr } = await supabase.storage
+            .from("feature-crops")
+            .download(crop.storage_path);
 
           if (!cropBlob) {
-            console.warn(`[backfill] Could not download crop ${crop.storage_path}`);
+            captureException(
+              dlErr ?? new Error("Missing crop blob"),
+              { fn: "backfill.downloadCrop", cropPath: crop.storage_path },
+            );
             continue;
           }
 
@@ -309,23 +354,35 @@ export async function ensureAllCropsUploaded(onProgress?: (done: number, total: 
           });
 
           if (insertErr) {
-            console.warn(`[backfill] Insert failed for ${crop.feature_type}:`, insertErr.message);
+            captureException(insertErr, {
+              fn: "backfill.insertEmbedding",
+              featureType: crop.feature_type,
+              imageId: img.id,
+            });
           } else {
             embeddedCount++;
           }
         } catch (err) {
-          console.warn(`[backfill] Embedding failed for ${crop.feature_type}:`, err);
+          captureException(err, {
+            fn: "backfill.embedOrInsert",
+            featureType: crop.feature_type,
+            imageId: img.id,
+          });
         }
       }
 
-      console.log(`[backfill] Image ${img.id}: embedded ${embeddedCount}/${uploadedCrops.length} features`);
+      if (embeddedCount < uploadedCrops.length) {
+        captureMessage(
+          `backfill partial embed: ${embeddedCount}/${uploadedCrops.length}`,
+          { imageId: img.id },
+        );
+      }
     }
 
     processed++;
   }
 
   onProgress?.(processed, total);
-  console.log(`[backfill] Done: processed ${processed}/${total} images`);
   return processed;
 }
 

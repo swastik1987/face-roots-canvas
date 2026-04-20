@@ -15,26 +15,11 @@
  */
 import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
-import { checkRateLimit } from '../_shared/rateLimit.ts';
 import { captureException } from '../_shared/sentry.ts';
 import { RunAnalysisInput, parseJsonBody } from '../_shared/schemas.ts';
 import { MODEL_VERSIONS } from '../_shared/models.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-
-// Feature regions: MediaPipe FaceMesh landmark indices (478-point model).
-// Excludes 'face_shape' (convex hull — not a fixed index list) and
-// 'ear_left'/'ear_right' (only reliable in profile shots).
-const FEATURE_REGIONS: Record<string, number[]> = {
-  eyes_left:      [33, 133, 157, 158, 159, 160, 161, 173, 246, 7, 163, 144, 145, 153, 154, 155],
-  eyes_right:     [362, 263, 384, 385, 386, 387, 388, 398, 466, 249, 390, 373, 374, 380, 381, 382],
-  nose:           [1, 2, 5, 4, 6, 19, 94, 168, 197, 195, 45, 275],
-  mouth:          [61, 291, 78, 308, 13, 14, 17, 0, 37, 267, 269, 270, 409],
-  jawline:        [172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397],
-  forehead:       [10, 67, 109, 108, 151, 337, 338, 297, 299],
-  eyebrows_left:  [46, 53, 52, 65, 55, 70, 63, 105, 66, 107],
-  eyebrows_right: [276, 283, 282, 295, 285, 300, 293, 334, 296, 336],
-};
 
 Deno.serve(async (req) => {
   const cors = handleCors(req);
@@ -52,21 +37,43 @@ Deno.serve(async (req) => {
 
     const db = getAdminClient();
 
-    // Fetch profile to determine rate limit tier
-    const { data: profile } = await db
-      .from('profiles')
-      .select('plan')
-      .eq('id', userId)
-      .single();
+    // ── Consent pre-check ────────────────────────────────────────────────────
+    // DPDP / GDPR: refuse to process embeddings unless the user has actively
+    // granted the `embeddings` scope and hasn't revoked consent since.
+    const { data: latestConsent, error: consentErr } = await db
+      .from('consent_events')
+      .select('event_type, scopes, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    // Rate limiting disabled during development — will be re-enabled later
-    // const isPro = profile?.plan === 'pro';
-    // await checkRateLimit({
-    //   userId,
-    //   action: 'run_analysis',
-    //   windowSecs: 86400,
-    //   maxCalls: isPro ? 30 : 10,
-    // });
+    if (consentErr) {
+      throw new Error(`Consent check failed: ${consentErr.message}`);
+    }
+    if (!latestConsent) {
+      return jsonResponse(
+        { error: 'Consent has not been granted. Please review the consent screen.' },
+        403,
+      );
+    }
+    if (latestConsent.event_type === 'revoked') {
+      return jsonResponse(
+        { error: 'Consent has been revoked. Please re-grant consent to run an analysis.' },
+        403,
+      );
+    }
+    const scopes = (latestConsent.scopes ?? {}) as Record<string, unknown>;
+    if (scopes.embeddings !== true) {
+      return jsonResponse(
+        { error: 'The "embeddings" consent scope is required to run an analysis.' },
+        403,
+      );
+    }
+
+    // TODO: re-enable rate limiting (3/day free, 30/day pro) via checkRateLimit
+    // from ../_shared/rateLimit.ts once ready for production traffic.
+
 
     // Verify self_person_id belongs to this user and is_self
     const { data: selfPerson, error: personErr } = await db
@@ -160,9 +167,9 @@ async function runPipeline(
     // We just verify they exist — no server-side embedding needed.
     await setStatus('embedding');
 
-    // Verify self has feature embeddings before proceeding — embedAllPersons
-    // catches errors per-image to avoid one bad image blocking everything,
-    // but if ALL images failed we need to stop here with a clear message.
+    // Verify self has feature embeddings before proceeding. The client is
+    // responsible for generating + inserting them before calling us; if none
+    // exist here, surface a clear reason based on which upstream step failed.
     const { data: analysisRow } = await db
       .from('analyses')
       .select('self_person_id')
@@ -243,94 +250,6 @@ async function runPipeline(
     console.error('[run-analysis] pipeline error:', err);
     await captureException(err, { functionName: 'run-analysis/pipeline', userId });
     await setStatus('failed', (err as Error).message);
-  }
-}
-
-/**
- * For every person owned by this user, for every face image:
- * 1. Look up feature crops already uploaded by the client (Canvas API)
- * 2. Call embed-features (CLIP per-crop) — idempotent per crop
- *
- * Feature cropping is done client-side in the browser (Capture.tsx /
- * FamilyAdd.tsx) using the Canvas API. The crops are uploaded to the
- * `feature-crops` bucket under `{person_id}/{face_image_id}/`.
- * This function lists those crops and sends them to embed-features.
- *
- * NOTE: embed-face (holistic InsightFace embedding) is skipped because
- * face_embeddings are NOT used in the matching pipeline. match-features
- * queries feature_embeddings only (per-crop CLIP).
- */
-async function embedAllPersons(
-  userId: string,
-  userToken: string,
-  db: ReturnType<typeof getAdminClient>,
-) {
-  const { data: persons } = await db
-    .from('persons')
-    .select('id')
-    .eq('owner_user_id', userId);
-
-  if (!persons?.length) return;
-
-  for (const person of persons) {
-    const { data: images } = await db
-      .from('face_images')
-      .select('id, storage_path')
-      .eq('person_id', person.id);
-
-    if (!images?.length) continue;
-
-    for (const image of images) {
-      // ── Step 1: check if feature embeddings already done ───────────────────
-      const { count: existingCount } = await db
-        .from('feature_embeddings')
-        .select('*', { count: 'exact', head: true })
-        .eq('face_image_id', image.id);
-
-      if (existingCount && existingCount >= Object.keys(FEATURE_REGIONS).length) {
-        // All feature embeddings already exist for this image — skip
-        continue;
-      }
-
-      // ── Step 2: list existing feature crops from storage ───────────────────
-      // Crops are uploaded client-side to: feature-crops/{userId}/{person_id}/{face_image_id}/
-      // The userId prefix is required by the storage RLS policy.
-      const cropPrefix = `${userId}/${person.id}/${image.id}`;
-      let crops: Array<{ feature_type: string; storage_path: string }> = [];
-
-      try {
-        const { data: cropFiles, error: listErr } = await db.storage
-          .from('feature-crops')
-          .list(cropPrefix);
-
-        if (listErr) {
-          console.warn(`[run-analysis] Failed to list crops at ${cropPrefix}:`, listErr.message);
-        }
-
-        crops = (cropFiles ?? [])
-          .filter(f => f.name.endsWith('.png'))
-          .map(f => ({
-            feature_type: f.name.replace('.png', ''),
-            storage_path: `${cropPrefix}/${f.name}`,
-          }));
-      } catch (err) {
-        console.warn(`[run-analysis] Error listing crops for ${image.id}:`, err);
-      }
-
-      if (crops.length === 0) {
-        console.warn(`[run-analysis] No feature crops found for face_image ${image.id} — client may not have uploaded them. Skipping.`);
-        continue;
-      }
-
-      console.log(`[run-analysis] Found ${crops.length} crops for face_image ${image.id}`);
-
-      // ── Step 3: generate CLIP embeddings for each crop ─────────────────────
-      try {
-        await callFunction('embed-features', { face_image_id: image.id, crops }, userToken);
-      } catch (err) {
-        console.warn(`[run-analysis] embed-features failed for ${image.id}:`, err);
-      }
-    }
   }
 }
 

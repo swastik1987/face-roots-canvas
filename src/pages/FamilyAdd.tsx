@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw, Pencil } from "lucide-react";
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
+import { extractPose } from "@/lib/face/pose";
 import { cropAndUploadFeatures } from "@/lib/face/uploadCrops";
 import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
 import { normalizeToPortrait } from "@/lib/face/normalize";
@@ -46,6 +47,12 @@ const RELATIONSHIP_OPTIONS = [
 ];
 
 type Phase = "pick" | "detecting" | "crop" | "confirm" | "saving" | "done" | "error";
+
+// Near-frontal gate for family uploads. Capture.tsx uses a stricter 8°
+// threshold for live self-capture; for static photo uploads we allow a
+// wider but still roughly head-on angle so portraits at slight angles pass.
+const FAMILY_YAW_MAX = 45;
+const FAMILY_PITCH_MAX = 30;
 
 // ── Face crop helper ──────────────────────────────────────────────────────────
 
@@ -193,6 +200,31 @@ const FamilyAdd = () => {
         URL.revokeObjectURL(url);
         setPreviewUrl("");
         return;
+      }
+
+      // Pose gate — reject non-frontal photos before the user invests time
+      // in cropping. We check before the crop so the bbox we compute is on
+      // a head that's actually facing the camera.
+      const pose = extractPose(result);
+      if (pose) {
+        if (Math.abs(pose.yaw) > FAMILY_YAW_MAX) {
+          setErrorMsg(
+            `This photo is turned ${Math.abs(Math.round(pose.yaw))}° off-centre. Please upload a near-frontal portrait (within ${FAMILY_YAW_MAX}°).`,
+          );
+          setPhase("error");
+          URL.revokeObjectURL(url);
+          setPreviewUrl("");
+          return;
+        }
+        if (Math.abs(pose.pitch) > FAMILY_PITCH_MAX) {
+          setErrorMsg(
+            `This photo is tilted ${Math.abs(Math.round(pose.pitch))}° up/down. Please upload a more level portrait (within ${FAMILY_PITCH_MAX}°).`,
+          );
+          setPhase("error");
+          URL.revokeObjectURL(url);
+          setPreviewUrl("");
+          return;
+        }
       }
 
       // Compute face bbox and crop
