@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
     }
 
     // Ownership
-    if ((faceImage.persons as { owner_user_id: string }).owner_user_id !== userId) {
+    if ((faceImage.persons as unknown as { owner_user_id: string }).owner_user_id !== userId) {
       return jsonResponse({ error: 'Forbidden' }, 403);
     }
 

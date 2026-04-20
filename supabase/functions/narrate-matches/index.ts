@@ -298,7 +298,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 }
 
 async function sha256Bytes(bytes: Uint8Array): Promise<string> {
-  const hashBuf = await crypto.subtle.digest('SHA-256', bytes);
+  const hashBuf = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
   return Array.from(new Uint8Array(hashBuf))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');

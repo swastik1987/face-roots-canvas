@@ -52,22 +52,6 @@ Deno.serve(async (req) => {
 
     const familyIds = familyPersons.map((p) => p.id);
 
-    // Same sanity check across family embeddings
-    const { data: familyVersionRows } = await db
-      .from("feature_embeddings")
-      .select("model_version")
-      .in("person_id", familyIds)
-      .limit(1000);
-    const familyVersions = new Set(
-      (familyVersionRows ?? []).map((r) => r.model_version ?? "unknown"),
-    );
-    const combined = new Set([...selfVersions, ...familyVersions]);
-    if (combined.size > 1) {
-      console.error(
-        `[match-features] self vs family embeddings use different model versions: ${[...combined].join(", ")} — results may be noisy`,
-      );
-    }
-
     // Get all feature types the self has embeddings for from front images
     const { data: selfFeatureRows } = await db
       .from("feature_embeddings")
@@ -81,15 +65,28 @@ Deno.serve(async (req) => {
 
     // Lightweight CLIP model-version sanity check — warn (don't fail) if the
     // self's embeddings mix model versions, or if the family's embeddings
-    // use a different version. Cosine similarity across model families is
-    // meaningless, so mismatches usually mean a stale row from an older
-    // client. We log to Sentry via console.error so ops can spot drift.
+    // use a different version.
     const selfVersions = new Set(
       selfFeatureRows.map((r) => r.model_version ?? "unknown"),
     );
     if (selfVersions.size > 1) {
       console.error(
         `[match-features] self embeddings mix model versions: ${[...selfVersions].join(", ")}`,
+      );
+    }
+
+    const { data: familyVersionRows } = await db
+      .from("feature_embeddings")
+      .select("model_version")
+      .in("person_id", familyIds)
+      .limit(1000);
+    const familyVersions = new Set(
+      (familyVersionRows ?? []).map((r) => r.model_version ?? "unknown"),
+    );
+    const combined = new Set([...selfVersions, ...familyVersions]);
+    if (combined.size > 1) {
+      console.error(
+        `[match-features] self vs family embeddings use different model versions: ${[...combined].join(", ")} — results may be noisy`,
       );
     }
 
