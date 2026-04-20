@@ -133,19 +133,39 @@ const Settings = () => {
         Settings
       </motion.h1>
 
-      <div className="space-y-3 mt-4">
-        {items.map((item, i) => (
+      <div className="space-y-2 mt-4">
+        <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-semibold pl-2">Account</p>
+        {items.filter(i => !i.danger).map((item, i) => (
           <motion.button
             key={item.label}
-            className={`glass-card w-full p-4 flex items-center gap-3 hover:bg-white/10 transition-colors ${item.danger ? 'border border-destructive/30' : ''}`}
+            className="glass-card focus-ring w-full p-4 flex items-center gap-3 hover:bg-white/10 transition-colors"
             onClick={item.onClick}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ ...spring, delay: i * 0.05 }}
           >
-            <item.icon size={20} className={item.danger ? 'text-destructive' : 'text-muted-foreground'} />
+            <item.icon size={20} className="text-muted-foreground" />
             <div className="flex-1 text-left">
-              <div className={item.danger ? 'text-destructive text-sm font-medium' : 'text-sm font-medium'}>{item.label}</div>
+              <div className="text-sm font-medium">{item.label}</div>
+              {item.sublabel && <div className="text-xs text-muted-foreground">{item.sublabel}</div>}
+            </div>
+            <ChevronRight size={16} className="text-muted-foreground" />
+          </motion.button>
+        ))}
+
+        <p className="text-[10px] uppercase tracking-widest text-destructive/70 font-semibold pl-2 pt-4">Danger zone</p>
+        {items.filter(i => i.danger).map((item, i) => (
+          <motion.button
+            key={item.label}
+            className="glass-card focus-ring w-full p-4 flex items-center gap-3 hover:bg-destructive/10 transition-colors border border-destructive/30"
+            onClick={item.onClick}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...spring, delay: (items.length - 1 + i) * 0.05 }}
+          >
+            <item.icon size={20} className="text-destructive" />
+            <div className="flex-1 text-left">
+              <div className="text-destructive text-sm font-medium">{item.label}</div>
               {item.sublabel && <div className="text-xs text-muted-foreground">{item.sublabel}</div>}
             </div>
             <ChevronRight size={16} className="text-muted-foreground" />

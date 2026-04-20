@@ -20,13 +20,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Share2, RefreshCw, AlertCircle, Loader2, HelpCircle } from 'lucide-react';
+import { Share2, HelpCircle } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { createSignedUrlSafe } from '@/lib/storage';
 import FaceSilhouette, { type FeatureType } from '@/components/results/FaceSilhouette';
 import { FeatureCard, type FeatureCardData } from '@/components/results/FeatureCard';
 import StaleAnalysisBanner from '@/components/results/StaleAnalysisBanner';
+import Shimmer from '@/components/ui/Shimmer';
+import ErrorState from '@/components/ui/ErrorState';
+import EmptyIllustration from '@/components/ui/EmptyIllustration';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -182,9 +185,15 @@ export default function Results() {
   // ── Loading ────────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-        <Loader2 size={36} className="animate-spin text-cyan" />
-        <p className="text-sm text-muted-foreground">Loading your DNA map…</p>
+      <div className="flex flex-col items-center min-h-screen pb-28 pt-10 px-6 gap-6 w-full max-w-sm mx-auto" aria-busy="true">
+        <Shimmer className="h-6 w-48" />
+        <Shimmer className="h-3 w-32" />
+        <Shimmer className="w-[220px] h-[308px] rounded-[40%]" rounded="" />
+        <div className="w-full space-y-3 mt-4">
+          <Shimmer className="h-24 w-full" />
+          <Shimmer className="h-24 w-full" />
+          <Shimmer className="h-24 w-full" />
+        </div>
       </div>
     );
   }
@@ -193,17 +202,11 @@ export default function Results() {
   if (error || !data) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-6">
-        <AlertCircle size={40} className="text-destructive" />
-        <p className="text-sm text-muted-foreground text-center max-w-xs">
-          {(error as Error)?.message ?? 'Could not load results.'}
-        </p>
-        <button
-          className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 transition-colors text-sm font-medium"
-          onClick={() => navigate('/home')}
-        >
-          <RefreshCw size={14} />
-          Back to home
-        </button>
+        <ErrorState
+          title="Couldn't load results"
+          body={(error as Error)?.message ?? 'Please try again in a moment.'}
+          action={{ label: 'Back to home', onClick: () => navigate('/home') }}
+        />
       </div>
     );
   }
@@ -213,13 +216,16 @@ export default function Results() {
   // ── Empty state ────────────────────────────────────────────────────────────
   if (!matches.length) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-6">
-        <p className="text-lg font-semibold">No matches found</p>
-        <p className="text-sm text-muted-foreground text-center max-w-xs">
-          Make sure you and at least one family member have completed feature capture.
-        </p>
+      <div className="flex flex-col items-center justify-center min-h-screen gap-5 px-6 text-center">
+        <EmptyIllustration variant="matches" className="w-48 h-36" />
+        <div className="space-y-1">
+          <p className="text-lg font-semibold">No matches yet</p>
+          <p className="text-sm text-muted-foreground max-w-xs">
+            Make sure you and at least one family member have completed feature capture.
+          </p>
+        </div>
         <button
-          className="btn-gradient px-6 py-2.5 text-sm mt-2"
+          className="btn-gradient focus-ring px-6 py-2.5 text-sm mt-2"
           onClick={() => navigate('/home')}
         >
           Go back home
@@ -329,14 +335,14 @@ export default function Results() {
         transition={{ delay: 0.7 }}
       >
         <button
-          className="btn-gradient px-8 py-3 text-base flex items-center gap-2 w-full justify-center"
+          className="btn-gradient focus-ring px-8 py-3 text-base flex items-center gap-2 w-full justify-center"
           onClick={() => navigate(`/results/${id}/share`)}
         >
           <Share2 size={18} />
           Share your DNA map
         </button>
         <button
-          className="flex items-center gap-2 px-8 py-3 text-sm font-medium rounded-xl bg-white/8 hover:bg-white/12 active:scale-[0.97] transition-all border border-white/10 w-full justify-center"
+          className="focus-ring flex items-center gap-2 px-8 py-3 text-sm font-medium rounded-xl bg-white/8 hover:bg-white/12 active:scale-[0.97] transition-all border border-white/10 w-full justify-center"
           onClick={() => navigate(`/mystery/${id}`)}
         >
           <HelpCircle size={16} className="text-cyan" />

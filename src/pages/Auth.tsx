@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { Mail, Loader2 } from 'lucide-react';
+import { Mail, Loader2, AlertCircle, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { lovable } from '@/integrations/lovable/index';
 import { useAuth } from '@/contexts/AuthContext';
@@ -72,13 +72,23 @@ const Auth = () => {
           animate={{ opacity: 1, scale: 1 }}
           transition={spring}
         >
-          <div className="text-4xl">📬</div>
+          <motion.div
+            initial={{ scale: 0.6, rotate: -10, opacity: 0 }}
+            animate={{ scale: 1, rotate: 0, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 280, damping: 18 }}
+            className="relative inline-flex"
+          >
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan/30 to-magenta/30 border border-white/10 flex items-center justify-center">
+              <Mail size={28} className="text-cyan" />
+            </div>
+            <Sparkles size={14} className="absolute -top-1 -right-1 text-magenta motion-safe:animate-pulse" />
+          </motion.div>
           <h1 className="text-xl font-bold">Check your inbox</h1>
           <p className="text-sm text-muted-foreground">
-            We sent a sign-in link to <strong>{email}</strong>. Click it to continue.
+            We sent a sign-in link to <strong className="text-foreground">{email}</strong>. Click it to continue.
           </p>
           <button
-            className="text-sm text-muted-foreground underline underline-offset-2"
+            className="focus-ring text-sm text-muted-foreground underline underline-offset-2 rounded"
             onClick={() => setStep('idle')}
           >
             Use a different email
@@ -103,8 +113,9 @@ const Auth = () => {
           <Input
             id="email"
             type="email"
+            autoComplete="email"
             placeholder="you@example.com"
-            className="bg-white/5 border-white/10"
+            className="bg-white/5 border-white/10 focus-visible:ring-2 focus-visible:ring-cyan/70"
             value={email}
             onChange={e => setEmail(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleMagicLink()}
@@ -113,11 +124,14 @@ const Auth = () => {
         </div>
 
         {step === 'error' && (
-          <p className="text-xs text-destructive">{errorMsg}</p>
+          <div className="flex items-start gap-2 text-xs text-destructive" role="alert">
+            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+            <span>{errorMsg}</span>
+          </div>
         )}
 
         <button
-          className="btn-gradient w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+          className="btn-gradient focus-ring w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
           onClick={handleMagicLink}
           disabled={step === 'sending'}
         >
@@ -126,7 +140,7 @@ const Auth = () => {
           ) : (
             <Mail size={18} />
           )}
-          Continue with email
+          {step === 'sending' ? 'Sending link…' : 'Continue with email'}
         </button>
 
         <div className="flex items-center gap-3">
@@ -136,10 +150,11 @@ const Auth = () => {
         </div>
 
         <button
-          className="w-full py-3 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors font-medium disabled:opacity-50"
+          className="focus-ring w-full py-3 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors font-medium disabled:opacity-50 flex items-center justify-center gap-2"
           onClick={handleGoogle}
           disabled={googleLoading}
         >
+          {googleLoading && <Loader2 size={16} className="animate-spin" />}
           {googleLoading ? 'Signing in…' : 'Continue with Google'}
         </button>
 

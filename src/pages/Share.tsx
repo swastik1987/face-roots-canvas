@@ -225,14 +225,22 @@ export default function SharePage() {
             exit={{ opacity: 0 }}
           >
             {/* Card skeleton */}
-            <div className="w-56 h-[25rem] rounded-2xl bg-gradient-to-b from-cyan/10 to-magenta/10 border border-white/10 flex flex-col items-center justify-center gap-3">
-              <Loader2 size={32} className="animate-spin text-cyan" />
-              <p className="text-xs text-muted-foreground text-center px-4">
+            <div className="relative w-56 h-[25rem] rounded-2xl overflow-hidden border border-white/10 bg-gradient-to-b from-cyan/10 to-magenta/10 flex flex-col items-center justify-center gap-3">
+              <div
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan/15 to-transparent"
+                style={{ animation: 'shimmer 2.4s infinite', backgroundSize: '200% 100%' }}
+                aria-hidden="true"
+              />
+              <Loader2 size={32} className="animate-spin text-cyan relative" />
+              <p className="text-xs text-muted-foreground text-center px-4 relative">
                 {state.phase === 'rendering' ? state.message : 'Loading your card…'}
               </p>
             </div>
             {state.phase === 'rendering' && (
-              <p className="text-xs text-muted-foreground">This may take up to 15 seconds</p>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan animate-pulse" />
+                This may take up to 15 seconds
+              </div>
             )}
           </motion.div>
         )}
@@ -293,7 +301,7 @@ export default function SharePage() {
             >
               {/* Download */}
               <button
-                className="btn-gradient flex-1 py-3 flex items-center justify-center gap-2 text-sm font-medium"
+                className="btn-gradient focus-ring flex-1 py-3 flex items-center justify-center gap-2 text-sm font-medium disabled:opacity-60"
                 onClick={handleDownload}
                 disabled={isDownloading}
               >
@@ -307,7 +315,7 @@ export default function SharePage() {
 
               {/* Share */}
               <button
-                className="flex-1 py-3 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                className="focus-ring flex-1 py-3 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors flex items-center justify-center gap-2 text-sm font-medium disabled:opacity-60"
                 onClick={handleShare}
                 disabled={isSharing}
               >

@@ -513,7 +513,43 @@ const FamilyAdd = () => {
         animate={{ opacity: 1, scale: 1 }}
         transition={spring}
       >
-        <h1 className="text-2xl font-bold text-center">Add family member</h1>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold text-center">Add family member</h1>
+          {/* Step indicator */}
+          {(() => {
+            const stepIdx =
+              phase === 'pick' || phase === 'error' ? 0
+              : phase === 'detecting' ? 1
+              : phase === 'crop' ? 1
+              : phase === 'confirm' ? 2
+              : phase === 'saving' ? 3
+              : phase === 'done' ? 3 : 0;
+            const labels = ['Pick', 'Detect', 'Details', 'Save'];
+            return (
+              <div className="flex items-center justify-center gap-2" aria-label={`Step ${stepIdx + 1} of 4`}>
+                {labels.map((label, i) => {
+                  const active = i === stepIdx;
+                  const done = i < stepIdx;
+                  return (
+                    <div key={label} className="flex items-center gap-2">
+                      <div className="flex flex-col items-center gap-1">
+                        <div
+                          className={`w-2 h-2 rounded-full transition-colors ${
+                            done ? 'bg-cyan' : active ? 'bg-gradient-to-r from-cyan to-magenta scale-150' : 'bg-white/20'
+                          }`}
+                        />
+                        <span className={`text-[10px] uppercase tracking-wider ${active ? 'text-cyan' : 'text-muted-foreground/70'}`}>
+                          {label}
+                        </span>
+                      </div>
+                      {i < labels.length - 1 && <div className="w-6 h-px bg-white/10" />}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
 
         {/* Photo picker / preview */}
         <AnimatePresence mode="wait">

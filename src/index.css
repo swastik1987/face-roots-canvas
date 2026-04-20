@@ -77,4 +77,41 @@
   .radial-glow {
     background: radial-gradient(ellipse at 50% 0%, hsl(var(--cyan) / 0.08) 0%, transparent 60%);
   }
+
+  .face-gradient {
+    background: radial-gradient(ellipse at 50% 40%, hsl(var(--cyan) / 0.35) 0%, hsl(var(--magenta) / 0.25) 40%, transparent 75%);
+  }
+
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+}
+
+@layer utilities {
+  @keyframes shimmer {
+    100% { transform: translateX(100%); }
+  }
+  @keyframes pulse-ring {
+    0%, 100% { box-shadow: 0 0 0 0 hsl(var(--cyan) / 0.35); }
+    50% { box-shadow: 0 0 0 10px hsl(var(--cyan) / 0); }
+  }
+  .animate-pulse-ring {
+    animation: pulse-ring 2.2s ease-out infinite;
+  }
+  @keyframes gradient-travel {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+  .animate-gradient-travel {
+    background-size: 200% 200%;
+    animation: gradient-travel 2.4s linear infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

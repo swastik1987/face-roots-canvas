@@ -7,11 +7,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw, Clock } from 'lucide-react';
 import { supabase, type Analysis } from '@/lib/supabase';
 import { captureEvent } from '@/lib/analytics';
 
 type Status = Analysis['status'];
+
+const SLOW_THRESHOLD_MS = 90_000;
+
+const PILL_LABELS: Record<Exclude<Status, 'done' | 'failed'>, string> = {
+  pending:   'Queued',
+  embedding: 'Reading',
+  matching:  'Matching',
+  narrating: 'Narrating',
+  rendering: 'Rendering',
+};
 
 const STATUS_LABELS: Record<Status, string> = {
   pending:   'Getting ready…',
@@ -39,6 +49,7 @@ const AnalysisProgress = () => {
 
   const [status, setStatus] = useState<Status>('pending');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [slow, setSlow] = useState(false);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -104,13 +115,20 @@ const AnalysisProgress = () => {
     }
   }, [status, id, navigate]);
 
+  // Soft timeout: show "taking longer than usual" after 90s
+  useEffect(() => {
+    if (status === 'done' || status === 'failed') return;
+    const t = setTimeout(() => setSlow(true), SLOW_THRESHOLD_MS);
+    return () => clearTimeout(t);
+  }, [status]);
+
   const isFailed = status === 'failed';
   const progress = isFailed ? 0 : progressFraction(status);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen px-6 gap-10">
       {/* Animated ring */}
-      <div className="relative w-28 h-28">
+      <div className="relative w-28 h-28" role="img" aria-label={`Analysis progress ${Math.round(progress * 100)}%`}>
         <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
           <circle
             cx="50" cy="50" r="44"
@@ -160,44 +178,64 @@ const AnalysisProgress = () => {
       </div>
 
       {/* Status label */}
-      <AnimatePresence mode="wait">
-        <motion.p
-          key={status}
-          className={`text-lg font-medium text-center ${isFailed ? 'text-destructive' : 'text-foreground'}`}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.25 }}
-        >
-          {STATUS_LABELS[status]}
-        </motion.p>
-      </AnimatePresence>
+      <div aria-live="polite" aria-atomic="true" className="text-center">
+        <AnimatePresence mode="wait">
+          <motion.p
+            key={status}
+            className={`text-lg font-medium ${isFailed ? 'text-destructive' : 'text-foreground'}`}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25 }}
+          >
+            {STATUS_LABELS[status]}
+          </motion.p>
+        </AnimatePresence>
+        {!isFailed && status !== 'done' && (
+          <p className="mt-1 text-xs text-muted-foreground">Usually takes about 30 seconds</p>
+        )}
+      </div>
 
       {/* Step pills */}
       <div className="flex gap-2 flex-wrap justify-center">
-        {STATUS_ORDER.filter(s => s !== 'done').map((s) => {
+        {STATUS_ORDER.filter((s): s is Exclude<Status, 'done' | 'failed'> => s !== 'done').map((s) => {
           const idx = STATUS_ORDER.indexOf(s);
           const currentIdx = STATUS_ORDER.indexOf(status);
           const done = idx < currentIdx;
-          const active = idx === currentIdx;
+          const active = idx === currentIdx && !isFailed;
 
           return (
-            <motion.span
+            <span
               key={s}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
                 done
                   ? 'bg-cyan/20 text-cyan'
                   : active
-                  ? 'bg-cyan/40 text-cyan ring-1 ring-cyan/60'
+                  ? 'bg-gradient-to-r from-cyan/40 via-magenta/40 to-cyan/40 text-white ring-1 ring-cyan/60 motion-safe:animate-gradient-travel'
                   : 'bg-white/5 text-muted-foreground'
               }`}
-              layout
             >
-              {STATUS_LABELS[s].replace('…', '')}
-            </motion.span>
+              {PILL_LABELS[s]}
+            </span>
           );
         })}
       </div>
+
+      {/* Slow banner */}
+      {slow && !isFailed && status !== 'done' && (
+        <motion.div
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass-card px-4 py-3 flex items-start gap-3 max-w-xs text-left"
+          role="status"
+        >
+          <Clock size={16} className="text-cyan shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium">Taking a bit longer than usual</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Hang tight — we're still working on your map.</p>
+          </div>
+        </motion.div>
+      )}
 
       {/* Error detail + retry */}
       {isFailed && (

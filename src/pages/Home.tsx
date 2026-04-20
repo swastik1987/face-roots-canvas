@@ -14,6 +14,9 @@ import { normalizeToPortrait } from "@/lib/face/normalize";
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 import PhotoEditSheet from "@/components/PhotoEditSheet";
 import FaceCropDialog from "@/components/FaceCropDialog";
+import FaceImg from "@/components/ui/FaceImg";
+import EmptyIllustration from "@/components/ui/EmptyIllustration";
+import ErrorState from "@/components/ui/ErrorState";
 import type { Person } from "@/lib/supabase";
 
 const spring = { type: "spring" as const, stiffness: 300, damping: 26 };
@@ -68,8 +71,10 @@ function SelfAvatar({
   return (
     <div className="flex flex-col items-center gap-2">
       <motion.div
-        className={`relative w-20 h-24 sm:w-24 sm:h-32 rounded-full overflow-hidden border-2 transition-colors cursor-pointer ${
-          captured ? "border-cyan shadow-[0_0_16px_rgba(0,229,255,0.4)]" : "border-dashed border-white/20 bg-white/5"
+        className={`relative w-20 h-24 sm:w-24 sm:h-32 rounded-full overflow-hidden border-2 transition-colors cursor-pointer focus-ring ${
+          captured
+            ? "border-cyan shadow-[0_0_16px_rgba(0,229,255,0.4)]"
+            : "border-dashed border-magenta/60 bg-white/5 motion-safe:animate-pulse-ring"
         }`}
         style={{ borderRadius: "50% / 50%", aspectRatio: "auto" }} // Explicitly override rounded-full constraint for an oval
         initial={{ opacity: 0, scale: 0.9 }}
@@ -84,10 +89,11 @@ function SelfAvatar({
         }}
       >
         {thumbnailUrl ? (
-          <img
+          <FaceImg
             src={thumbnailUrl}
             alt={self?.display_name ?? "You"}
             className="w-full h-full object-cover"
+            fallbackClassName="w-full h-full"
             style={{ objectPosition: facePosition }}
           />
         ) : (
@@ -453,17 +459,12 @@ const Home = () => {
   // ── Error ──────────────────────────────────────────────────────────────────
   if (isError) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-6" role="alert">
-        <AlertCircle size={36} className="text-destructive" aria-hidden="true" />
-        <p className="text-sm text-muted-foreground text-center">Could not load your family tree. Please try again.</p>
-        <button
-          className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 transition-colors text-sm font-medium"
-          onClick={() => refetch()}
-          aria-label="Retry loading family tree"
-        >
-          <RefreshCw size={14} aria-hidden="true" />
-          Retry
-        </button>
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 px-6">
+        <ErrorState
+          title="Couldn't load your family tree"
+          body="Check your connection and try again."
+          action={{ label: "Retry", onClick: () => refetch() }}
+        />
       </div>
     );
   }
@@ -559,6 +560,20 @@ const Home = () => {
       >
         Family Tree
       </motion.h1>
+
+      {family.length === 0 && !self && (
+        <motion.div
+          className="flex flex-col items-center gap-3 text-center max-w-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.15 }}
+        >
+          <EmptyIllustration variant="tree" className="w-48 h-36 opacity-80" />
+          <p className="text-sm text-muted-foreground">
+            Start by capturing yourself, then add family members. You'll need at least one relative to discover your Family DNA.
+          </p>
+        </motion.div>
+      )}
 
       <div className="flex flex-col items-center w-full relative mt-2 gap-8 sm:gap-14">
         {/* --- TIER 1: Grandparents & Parents --- */}
@@ -763,7 +778,12 @@ function FamilyMemberAvatar({ person }: { person: Person }) {
       style={{ borderRadius: "50% / 50%" }}
     >
       {thumbnailUrl ? (
-        <img src={thumbnailUrl} alt={person.display_name} className="w-full h-full object-cover object-center" />
+        <FaceImg
+          src={thumbnailUrl}
+          alt={person.display_name}
+          className="w-full h-full object-cover object-center"
+          fallbackClassName="w-full h-full"
+        />
       ) : (
         <User size={22} className="text-muted-foreground" aria-hidden="true" />
       )}

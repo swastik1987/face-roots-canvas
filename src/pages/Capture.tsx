@@ -17,7 +17,7 @@ import Webcam from "react-webcam";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Loader2, RotateCcw } from "lucide-react";
+import { CheckCircle2, Loader2, RotateCcw, AlertCircle } from "lucide-react";
 import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from "@/lib/face/detector";
 import { extractPose } from "@/lib/face/pose";
 import { cropAndUploadFeatures, loadImageFromBlob } from "@/lib/face/uploadCrops";
@@ -613,10 +613,23 @@ const Capture = () => {
       {/* Camera error */}
       {cameraError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-20 bg-black px-6 text-center">
-          <p className="text-white/80">Camera access denied or unavailable.</p>
-          <button className="btn-gradient px-6 py-2 text-sm" onClick={() => navigate("/home")}>
-            Go back
-          </button>
+          <div className="w-14 h-14 rounded-full bg-destructive/15 border border-destructive/30 flex items-center justify-center">
+            <AlertCircle size={26} className="text-destructive" />
+          </div>
+          <div className="space-y-1 max-w-xs">
+            <p className="text-white font-semibold">Camera unavailable</p>
+            <p className="text-sm text-white/60">
+              We couldn't access your camera. Check your browser permissions or try the upload fallback.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button className="focus-ring px-5 py-2 rounded-full bg-white/10 hover:bg-white/15 text-sm" onClick={() => window.location.reload()}>
+              Try again
+            </button>
+            <button className="btn-gradient focus-ring px-5 py-2 text-sm" onClick={() => navigate("/home")}>
+              Go back
+            </button>
+          </div>
         </div>
       )}
 

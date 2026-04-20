@@ -101,7 +101,7 @@ const Splash = () => {
           <motion.div
             className="w-0.5 h-8 bg-gradient-to-b from-white/20 to-transparent rounded-full"
             animate={{ scaleY: [1, 0.4, 1] }}
-            transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
+            transition={{ repeat: 6, duration: 1.8, ease: "easeInOut" }}
           />
           <span className="text-xs">scroll</span>
         </motion.div>
