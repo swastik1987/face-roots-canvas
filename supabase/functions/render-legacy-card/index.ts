@@ -18,8 +18,8 @@
  * Idempotent: if card_storage_path already exists, skips render and returns
  * a fresh signed URL for the existing file.
  */
-import satori from 'https://esm.sh/satori@0.10.14';
-import { initWasm, Resvg } from 'https://esm.sh/@resvg/resvg-wasm@2.6.0';
+import satori from 'npm:satori@0.10.14';
+import { initWasm, Resvg } from 'npm:@resvg/resvg-wasm@2.6.0';
 
 import { handleCors, jsonResponse, requireAuth } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
