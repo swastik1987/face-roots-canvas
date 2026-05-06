@@ -1,37 +1,44 @@
-
 ## Goal
-Fix the over-zoomed camera on `/capture`, ensure the full face fits inside the oval before auto-capture triggers, and make the alignment grid lines colored for better visual guidance.
 
-## Root cause
-`react-webcam` is rendered with `object-cover` inside a container, which crops + scales the video to fill the screen — this is why the face appears ~2x zoomed. Combined with `MIN_FACE_RATIO = 0.18` (face must fill 18% of frame), users have to bring their face very close, reinforcing the zoom feel.
+Make the exported Legacy Card show every matched facial feature (not just top 6), and present each as an expanded comparison row with side-by-side mini crops of the user and the matched relative — letting the card grow taller as needed.
 
-## Changes (single file: `src/pages/Capture.tsx`)
+## Changes
 
-### 1. Remove the camera "zoom" effect
-- Switch the `<Webcam>` element from `object-cover` to `object-contain` so the full sensor frame is visible without cropping.
-- Use `videoConstraints` of `{ width: 1280, height: 720, facingMode: 'user', aspectRatio: 16/9 }` to lock 1:1 (no digital zoom) and let the browser pick the native resolution.
-- Center the video with flex; let letterboxing happen naturally on portrait phones rather than cropping.
+### 1. `supabase/functions/render-legacy-card/index.ts`
+- Remove the `.limit(6)` on the `feature_matches` query so every match comes through.
+- For each match, fetch the most recent `feature_embeddings.crop_storage_path` for:
+  - the self person + that `feature_type` (user crop)
+  - the winner person + that `feature_type` (relative crop)
+- Sign each crop URL (5-min), download as base64 (jpeg/png), pass into the card. Run downloads with bounded concurrency (4 at a time) to keep cold-start time reasonable. On any failure, fall back to initials placeholder for that thumbnail.
+- Compute the dynamic canvas height based on number of matches (e.g. `headerHeight + avatarHeight + sectionHeader + rows * rowHeight + footer`) and pass it to both Satori and Resvg (`fitTo` value updated). Width stays 1080.
 
-### 2. Require the full face inside the oval
-- Lower `MIN_FACE_RATIO` from `0.18` → `0.11` (face must fill ~11% of frame minimum) so users can stand at a comfortable distance.
-- Add an `MAX_FACE_RATIO = 0.32` upper bound — if the face is too big (close to camera), show "Move back" hint and block capture.
-- Add an oval-fit check using the landmark bbox: the face bbox must be **fully contained** within the oval region (computed in normalized video coords matching the SVG oval ~0.55 wide × 0.78 tall, centered). If any of the 4 bbox corners fall outside the oval, set hint to "Fit your whole face in the oval" and block capture.
-- Update `alignmentHint` priority: no-face → too-close → too-small → outside-oval → yaw → pitch → aligned.
+### 2. `supabase/functions/_shared/cards/legacyCard.ts`
+- Extend `CardMatch` with `userCropB64: string | null` and `winnerCropB64: string | null`.
+- Extend `CardData` with a computed `height: number`.
+- Replace `matchRow` with an expanded layout per feature:
+  ```
+  ┌──────────────────────────────────────────────┐
+  │ [you 140²]  vs  [relative 140²]              │
+  │  Feature name              82% ████████      │
+  │  like {RelativeName} ({relationship})        │
+  └──────────────────────────────────────────────┘
+  ```
+  - Square rounded thumbnails (140×140), gradient ring on the user's, neutral ring on the relative's, "vs" label between.
+  - Feature label + similarity bar on the right of thumbnails (or below on narrower rows — single-column stacked layout works since width is 1080).
+  - Show all matches (no slice).
+- Use the dynamic `height` from `CardData` for the outer container.
 
-### 3. Colored grid lines for guidance
-Replace the current monochrome white grid in `OvalOverlay` with a semantic color palette (matching the landing-page "What you'll discover" inspiration):
-- **Eye line (33%)**: cyan (`#22d3ee`) — "eyes"
-- **Nose line (58%)**: fuchsia (`#e879f9`) — "nose"
-- **Mouth line (72%)**: amber (`#fbbf24`) — "mouth"
-- **Vertical center axis**: soft white (`rgba(255,255,255,0.4)`) — neutral reference
-- **Rule-of-thirds dashed grid**: very faint white (`rgba(255,255,255,0.15)`) — kept subtle so colored feature lines pop
-- Each colored line gets a tiny label dot at the right edge (4px circle in matching color) so the meaning is implicit.
-- When `isLocked` (capture armed), all colored lines brighten to full opacity; when only `hasFace` is true, they sit at 0.6 opacity; idle = 0.35.
+### 3. No DB / RLS changes
+All needed data already exists (`feature_embeddings.crop_storage_path`, `feature_matches`). No migrations.
 
-### 4. Small copy additions
-- Add new hint strings: `"Move back a little"` (too close) and `"Fit your whole face in the oval"` (bbox outside oval).
+### 4. Frontend
+No changes — `Share.tsx` just consumes the signed URL; a taller image renders fine inside the existing `<img>` (it scales to width).
+
+## Validation
+- After deploy, call `render-legacy-card` for an existing analysis via `curl_edge_functions`, fetch the resulting PNG, and visually QA: confirm all features rendered, both crops visible, no clipped rows, footer present at bottom.
+- Check edge function logs for crop-fetch failures.
 
 ## Out of scope
-- No changes to the cropping/upload pipeline — the captured 768×1024 oval JPEG output is unchanged.
-- No changes to Home, Results, or edge functions.
-- No new dependencies.
+- Renaming "Family DNA Map" copy.
+- Adding the LLM verdict caption (could be a follow-up).
+- Caching crop downloads across renders.
