@@ -26,13 +26,16 @@ export interface CardMatch {
   winnerName: string;
   relationship: string;
   similarity: number; // 0..1
+  userCropB64?: string | null;
+  winnerCropB64?: string | null;
 }
 
 export interface CardData {
   selfName: string;
   selfImageB64: string | null; // jpeg base64 or null
-  matches: CardMatch[];        // sorted desc by similarity, max 6
+  matches: CardMatch[];        // sorted desc by similarity
   isPro: boolean;
+  height?: number;             // dynamic canvas height (>=1920)
 }
 
 const CYAN    = '#06b6d4';
