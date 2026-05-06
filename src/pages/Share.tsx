@@ -124,7 +124,7 @@ export default function SharePage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'faceroots-dna-map.png';
+      a.download = 'faceblame-dna-map.png';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -148,7 +148,7 @@ export default function SharePage() {
         try {
           const res = await fetch(state.signedUrl);
           const blob = await res.blob();
-          const file = new File([blob], 'faceroots-dna-map.png', { type: 'image/png' });
+          const file = new File([blob], 'faceblame-dna-map.png', { type: 'image/png' });
 
           const shareData: ShareData = {
             title: 'My Family DNA Map',

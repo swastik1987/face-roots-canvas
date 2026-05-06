@@ -6,7 +6,7 @@
  *
  * Design:
  *   ┌─────────────────────────────────────────┐
- *   │  FaceRoots wordmark + tagline           │
+ *   │  FaceBlame wordmark + tagline           │
  *   │  ────────────────────────────────────── │
  *   │       [ self face avatar, 360×360 ]     │
  *   │  ────────────────────────────────────── │
@@ -17,7 +17,7 @@
  *   │  … (up to 6 rows)                       │
  *   │                                         │
  *   │  Fun resemblance analysis — not a test  │
- *   │  Made with FaceRoots   (free only)      │
+ *   │  Made with FaceBlame   (free only)      │
  *   └─────────────────────────────────────────┘
  */
 
@@ -296,7 +296,7 @@ export function buildLegacyCard(data: CardData): object {
                     color: CYAN,
                     letterSpacing: '-2px',
                   },
-                  children: 'FaceRoots',
+                  children: 'FaceBlame',
                 },
               },
               // Tagline
@@ -461,7 +461,7 @@ export function buildLegacyCard(data: CardData): object {
                           fontWeight: 600,
                           color: `${CYAN}bb`,
                         },
-                        children: 'Made with FaceRoots',
+                        children: 'Made with FaceBlame',
                       },
                     },
                   ]),
