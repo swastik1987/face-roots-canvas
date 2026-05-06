@@ -277,8 +277,9 @@ function glowBlob(opts: {
 
 /** Build the full Satori element tree for the Legacy Card. */
 export function buildLegacyCard(data: CardData): object {
-  const { selfName, selfImageB64, matches, isPro } = data;
-  const topSix = matches.slice(0, 6);
+  const { selfName, selfImageB64, matches, isPro, height } = data;
+  const cardHeight = height ?? 1920;
+  const allMatches = matches;
 
   // ── Self avatar ────────────────────────────────────────────────────────────
   const avatarInner = selfImageB64
