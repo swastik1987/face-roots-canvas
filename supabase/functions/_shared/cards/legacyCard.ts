@@ -499,7 +499,7 @@ export function buildLegacyCard(data: CardData): object {
               paddingRight: 40,
               flex: 1,
             },
-            children: topSix.map((m, i) => matchRow(m, i)),
+            children: allMatches.map((m, i) => matchRow(m, i)),
           },
         },
 
