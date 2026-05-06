@@ -107,13 +107,12 @@ Deno.serve(async (req) => {
 
     const isPro = profile?.plan === 'pro';
 
-    // ── 4. Fetch top-6 feature matches + winner persons ──────────────────────
+    // ── 4. Fetch all feature matches + winner persons ────────────────────────
     const { data: matches } = await db
       .from('feature_matches')
       .select('feature_type, winner_person_id, winner_similarity')
       .eq('analysis_id', analysis_id)
-      .order('winner_similarity', { ascending: false })
-      .limit(6);
+      .order('winner_similarity', { ascending: false });
 
     const winnerIds = [
       ...new Set((matches ?? []).map((m) => m.winner_person_id).filter(Boolean)),
@@ -134,7 +133,25 @@ Deno.serve(async (req) => {
 
     const selfName = selfPerson?.display_name ?? profile?.display_name ?? 'You';
 
-    // ── 6. Fetch self's front-angle face image as base64 ─────────────────────
+    // ── 6. Helper: fetch a storage object as base64 ──────────────────────────
+    async function fetchCropB64(bucket: string, path: string | null | undefined): Promise<string | null> {
+      if (!path) return null;
+      try {
+        const { data: signed } = await db.storage.from(bucket).createSignedUrl(path, 300);
+        if (!signed?.signedUrl) return null;
+        const res = await fetch(signed.signedUrl);
+        if (!res.ok) return null;
+        const buf = await res.arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(buf);
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary);
+      } catch {
+        return null;
+      }
+    }
+
+    // ── 7. Fetch self's front-angle face image as base64 ─────────────────────
     let selfImageB64: string | null = null;
     try {
       const { data: faceImg } = await db
@@ -145,49 +162,113 @@ Deno.serve(async (req) => {
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
-
-      if (faceImg?.storage_path) {
-        const { data: signed } = await db.storage
-          .from('face-images-raw')
-          .createSignedUrl(faceImg.storage_path, 300);
-
-        if (signed?.signedUrl) {
-          const imgRes = await fetch(signed.signedUrl);
-          if (imgRes.ok) {
-            const buf = await imgRes.arrayBuffer();
-            selfImageB64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-          }
-        }
-      }
+      selfImageB64 = await fetchCropB64('face-images-raw', faceImg?.storage_path);
     } catch {
-      // Non-fatal: card will render with initials placeholder
+      // Non-fatal
     }
 
-    // ── 7. Build card data ────────────────────────────────────────────────────
-    const cardMatches: CardMatch[] = (matches ?? []).map((m) => {
+    // ── 8. Fetch per-feature crop paths for self + each winner ───────────────
+    const allMatches = matches ?? [];
+    const featureTypes = [...new Set(allMatches.map((m) => m.feature_type))];
+
+    const { data: selfCrops } = featureTypes.length
+      ? await db
+          .from('feature_embeddings')
+          .select('feature_type, crop_storage_path, created_at')
+          .eq('person_id', analysis.self_person_id)
+          .in('feature_type', featureTypes)
+          .order('created_at', { ascending: false })
+      : { data: [] };
+
+    const selfCropMap = new Map<string, string>();
+    for (const r of selfCrops ?? []) {
+      if (r.crop_storage_path && !selfCropMap.has(r.feature_type)) {
+        selfCropMap.set(r.feature_type, r.crop_storage_path);
+      }
+    }
+
+    const winnerCropMap = new Map<string, string>();
+    if (winnerIds.length && featureTypes.length) {
+      const { data: winnerCrops } = await db
+        .from('feature_embeddings')
+        .select('person_id, feature_type, crop_storage_path, created_at')
+        .in('person_id', winnerIds)
+        .in('feature_type', featureTypes)
+        .order('created_at', { ascending: false });
+      for (const r of winnerCrops ?? []) {
+        const key = `${r.person_id}:${r.feature_type}`;
+        if (r.crop_storage_path && !winnerCropMap.has(key)) {
+          winnerCropMap.set(key, r.crop_storage_path);
+        }
+      }
+    }
+
+    // Bounded-concurrency download of crop images
+    async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+      const results: R[] = new Array(items.length);
+      let i = 0;
+      const workers = Array.from({ length: Math.min(limit, items.length) || 1 }, async () => {
+        while (true) {
+          const idx = i++;
+          if (idx >= items.length) return;
+          results[idx] = await fn(items[idx]);
+        }
+      });
+      await Promise.all(workers);
+      return results;
+    }
+
+    const cropPairs = await mapLimit(allMatches, 4, async (m) => {
+      const selfPath = selfCropMap.get(m.feature_type);
+      const winnerPath = m.winner_person_id
+        ? winnerCropMap.get(`${m.winner_person_id}:${m.feature_type}`)
+        : null;
+      const [userCropB64, winnerCropB64] = await Promise.all([
+        fetchCropB64('feature-crops', selfPath),
+        fetchCropB64('feature-crops', winnerPath),
+      ]);
+      return { userCropB64, winnerCropB64 };
+    });
+
+    // ── 9. Build card data ────────────────────────────────────────────────────
+    const cardMatches: CardMatch[] = allMatches.map((m, idx) => {
       const p = personMap.get(m.winner_person_id);
       return {
         featureType: m.feature_type,
         winnerName: p?.display_name ?? 'Family member',
         relationship: p?.relationship_tag ?? 'family',
         similarity: m.winner_similarity ?? 0,
+        userCropB64: cropPairs[idx]?.userCropB64 ?? null,
+        winnerCropB64: cropPairs[idx]?.winnerCropB64 ?? null,
       };
     });
 
-    // ── 8. Initialise WASM + fonts in parallel ────────────────────────────────
+    // ── 10. Initialise WASM + fonts in parallel ───────────────────────────────
     const [fonts] = await Promise.all([getInterFonts(), ensureWasm()]);
 
-    // ── 9. Satori → SVG ───────────────────────────────────────────────────────
+    // ── 11. Compute dynamic canvas height (expanded rows) ────────────────────
+    const HEADER_HEIGHT = 100 + 72 + 14 + 30 + 56;
+    const AVATAR_BLOCK = 64 + 400 + 64;
+    const SECTION_HEADER = 52 + 40 + 36;
+    const ROW_HEIGHT = 230;
+    const FOOTER_HEIGHT = 40 + 48 + 24 * 3 + 26 + 1;
+    const cardHeight = Math.max(
+      1920,
+      HEADER_HEIGHT + AVATAR_BLOCK + SECTION_HEADER + cardMatches.length * ROW_HEIGHT + FOOTER_HEIGHT,
+    );
+
+    // ── 12. Satori → SVG ──────────────────────────────────────────────────────
     const element = buildLegacyCard({
       selfName,
       selfImageB64,
       matches: cardMatches,
       isPro,
+      height: cardHeight,
     });
 
     const svg = await (satori as any)(element, {
       width: 1080,
-      height: 1920,
+      height: cardHeight,
       fonts,
     });
 

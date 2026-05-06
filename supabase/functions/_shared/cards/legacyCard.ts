@@ -26,13 +26,16 @@ export interface CardMatch {
   winnerName: string;
   relationship: string;
   similarity: number; // 0..1
+  userCropB64?: string | null;
+  winnerCropB64?: string | null;
 }
 
 export interface CardData {
   selfName: string;
   selfImageB64: string | null; // jpeg base64 or null
-  matches: CardMatch[];        // sorted desc by similarity, max 6
+  matches: CardMatch[];        // sorted desc by similarity
   isPro: boolean;
+  height?: number;             // dynamic canvas height (>=1920)
 }
 
 const CYAN    = '#06b6d4';
@@ -106,7 +109,57 @@ function simBar(sim: number): object {
   };
 }
 
-/** One match row. */
+/** Square thumbnail with optional ringed border. Falls back to a tinted placeholder. */
+function thumb(b64: string | null | undefined, ringColor: string, label: string): object {
+  const SIZE = 150;
+  if (b64) {
+    return {
+      type: 'div',
+      props: {
+        style: {
+          width: SIZE,
+          height: SIZE,
+          borderRadius: 24,
+          border: `3px solid ${ringColor}`,
+          overflow: 'hidden',
+          display: 'flex',
+        },
+        children: {
+          type: 'img',
+          props: {
+            src: `data:image/png;base64,${b64}`,
+            style: {
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+            },
+          },
+        },
+      },
+    };
+  }
+  return {
+    type: 'div',
+    props: {
+      style: {
+        width: SIZE,
+        height: SIZE,
+        borderRadius: 24,
+        border: `3px solid ${ringColor}`,
+        background: 'rgba(255,255,255,0.05)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'rgba(255,255,255,0.40)',
+        fontSize: 22,
+        fontWeight: 600,
+      },
+      children: label,
+    },
+  };
+}
+
+/** Expanded match row: side-by-side crops + feature/name + similarity bar. */
 function matchRow(m: CardMatch, idx: number): object {
   return {
     type: 'div',
@@ -115,13 +168,44 @@ function matchRow(m: CardMatch, idx: number): object {
         display: 'flex',
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '22px 40px',
+        gap: 28,
+        padding: '24px 40px',
         background: idx % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'transparent',
-        borderRadius: 20,
+        borderRadius: 24,
+        marginBottom: 8,
       },
       children: [
-        // Left: feature + person name
+        // Side-by-side thumbs with vs label
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 14,
+              flexShrink: 0,
+            },
+            children: [
+              thumb(m.userCropB64, `${CYAN}cc`, 'You'),
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    fontSize: 22,
+                    fontWeight: 700,
+                    color: 'rgba(255,255,255,0.45)',
+                    letterSpacing: 1,
+                    display: 'flex',
+                  },
+                  children: 'vs',
+                },
+              },
+              thumb(m.winnerCropB64, `${MAGENTA}cc`, m.winnerName?.charAt(0)?.toUpperCase() || '?'),
+            ],
+          },
+        },
+        // Right block: feature label + "like X" + similarity bar
         {
           type: 'div',
           props: {
@@ -129,14 +213,15 @@ function matchRow(m: CardMatch, idx: number): object {
               display: 'flex',
               flexDirection: 'column',
               flex: 1,
+              gap: 10,
             },
             children: [
               {
                 type: 'div',
                 props: {
                   style: {
-                    fontSize: 30,
-                    fontWeight: 600,
+                    fontSize: 34,
+                    fontWeight: 700,
                     color: '#ffffff',
                   },
                   children: formatFeature(m.featureType),
@@ -147,17 +232,15 @@ function matchRow(m: CardMatch, idx: number): object {
                 props: {
                   style: {
                     fontSize: 24,
-                    color: 'rgba(255,255,255,0.50)',
-                    marginTop: 6,
+                    color: 'rgba(255,255,255,0.55)',
                   },
-                  children: `like ${m.winnerName || 'family'}`,
+                  children: `like ${m.winnerName || 'family'} (${m.relationship || 'family'})`,
                 },
               },
+              simBar(m.similarity),
             ],
           },
         },
-        // Right: similarity bar
-        simBar(m.similarity),
       ],
     },
   };
@@ -194,8 +277,9 @@ function glowBlob(opts: {
 
 /** Build the full Satori element tree for the Legacy Card. */
 export function buildLegacyCard(data: CardData): object {
-  const { selfName, selfImageB64, matches, isPro } = data;
-  const topSix = matches.slice(0, 6);
+  const { selfName, selfImageB64, matches, isPro, height } = data;
+  const cardHeight = height ?? 1920;
+  const allMatches = matches;
 
   // ── Self avatar ────────────────────────────────────────────────────────────
   const avatarInner = selfImageB64
@@ -260,7 +344,7 @@ export function buildLegacyCard(data: CardData): object {
         flexDirection: 'column',
         alignItems: 'stretch',
         width: 1080,
-        height: 1920,
+        height: cardHeight,
         background: BG,
         fontFamily: 'Inter',
         color: '#ffffff',
@@ -415,7 +499,7 @@ export function buildLegacyCard(data: CardData): object {
               paddingRight: 40,
               flex: 1,
             },
-            children: topSix.map((m, i) => matchRow(m, i)),
+            children: allMatches.map((m, i) => matchRow(m, i)),
           },
         },
 

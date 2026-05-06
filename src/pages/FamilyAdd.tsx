@@ -520,10 +520,9 @@ const FamilyAdd = () => {
             const stepIdx =
               phase === 'pick' || phase === 'error' ? 0
               : phase === 'detecting' ? 1
-              : phase === 'crop' ? 1
               : phase === 'confirm' ? 2
               : phase === 'saving' ? 3
-              : phase === 'done' ? 3 : 0;
+              : 0;
             const labels = ['Pick', 'Detect', 'Details', 'Save'];
             return (
               <div className="flex items-center justify-center gap-2" aria-label={`Step ${stepIdx + 1} of 4`}>
