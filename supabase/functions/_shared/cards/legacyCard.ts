@@ -344,7 +344,7 @@ export function buildLegacyCard(data: CardData): object {
         flexDirection: 'column',
         alignItems: 'stretch',
         width: 1080,
-        height: 1920,
+        height: cardHeight,
         background: BG,
         fontFamily: 'Inter',
         color: '#ffffff',
