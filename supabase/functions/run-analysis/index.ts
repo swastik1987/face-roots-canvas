@@ -1,5 +1,5 @@
 /**
- * run-analysis — orchestrator for the full FaceRoots ML pipeline.
+ * run-analysis — orchestrator for the full FaceBlame ML pipeline.
  *
  * Input:  { self_person_id: string }
  * Output: { analysis_id: string }
