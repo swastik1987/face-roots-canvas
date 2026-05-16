@@ -128,11 +128,14 @@ const FamilyAdd = () => {
   const [detectionResult, setDetectionResult] = useState<FaceLandmarkerResult | null>(null);
   const [bboxPercent, setBboxPercent] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [name, setName] = useState("");
-  const [relationTag, setRelationTag] = useState(searchParams.get("tag") ?? "");
+  const isSelfMode = searchParams.get("self") === "1";
+  const [relationTag, setRelationTag] = useState(
+    isSelfMode ? "self" : (searchParams.get("tag") ?? ""),
+  );
   const [showCropDialog, setShowCropDialog] = useState(false);
-  // When present, we're replacing the photo of an existing family member
-  // instead of adding a new one. Skips the persons insert and re-uses the
-  // existing row; the replace helper purges the old face_images + crops.
+  // When present, we're replacing the photo of an existing person (self or
+  // family) instead of adding a new one. Skips the persons insert and re-uses
+  // the existing row; the replace helper purges the old face_images + crops.
   const replacePersonId = searchParams.get("person_id");
 
   // Cleanup object URLs on unmount
@@ -142,24 +145,45 @@ const FamilyAdd = () => {
     };
   }, [previewUrl]);
 
-  // Pre-fill name/relationship when re-uploading for an existing person.
+  // Effective person id to replace (explicit param OR existing self in self mode).
+  const [effectiveReplaceId, setEffectiveReplaceId] = useState<string | null>(replacePersonId);
+
+  // Pre-fill name/relationship when re-uploading for an existing person,
+  // or when in self mode (look up existing self to replace).
   useEffect(() => {
-    if (!replacePersonId) return;
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from("persons")
-        .select("display_name, relationship_tag")
-        .eq("id", replacePersonId)
-        .maybeSingle();
-      if (cancelled || !data) return;
-      setName(data.display_name ?? "");
-      setRelationTag(data.relationship_tag ?? "");
+      if (replacePersonId) {
+        const { data } = await supabase
+          .from("persons")
+          .select("display_name, relationship_tag")
+          .eq("id", replacePersonId)
+          .maybeSingle();
+        if (cancelled || !data) return;
+        setName(data.display_name ?? "");
+        setRelationTag(data.relationship_tag ?? "");
+        return;
+      }
+      if (isSelfMode && user) {
+        const { data } = await supabase
+          .from("persons")
+          .select("id, display_name")
+          .eq("owner_user_id", user.id)
+          .eq("is_self", true)
+          .maybeSingle();
+        if (cancelled) return;
+        if (data) {
+          setEffectiveReplaceId(data.id);
+          setName(data.display_name ?? "Me");
+        } else {
+          setName((prev) => prev || "Me");
+        }
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [replacePersonId]);
+  }, [replacePersonId, isSelfMode, user]);
 
   // ── File pick + detection ──────────────────────────────────────────────────
 
@@ -263,19 +287,21 @@ const FamilyAdd = () => {
 
     try {
       const rel = RELATIONSHIP_OPTIONS.find((r) => r.tag === relationTag);
-      const generation = rel?.generation ?? 0;
+      const generation = isSelfMode ? 0 : (rel?.generation ?? 0);
+      const tag = isSelfMode ? "self" : relationTag;
 
       // Replace mode: re-use the existing person row; otherwise insert a new one.
       let person: { id: string };
-      if (replacePersonId) {
+      const replaceId = effectiveReplaceId;
+      if (replaceId) {
         const { data: updated, error: ue } = await supabase
           .from("persons")
           .update({
             display_name: name.trim(),
-            relationship_tag: relationTag,
+            relationship_tag: tag,
             generation,
           })
-          .eq("id", replacePersonId)
+          .eq("id", replaceId)
           .eq("owner_user_id", user.id)
           .select("id")
           .single();
@@ -287,9 +313,9 @@ const FamilyAdd = () => {
           .insert({
             owner_user_id: user.id,
             display_name: name.trim(),
-            relationship_tag: relationTag,
+            relationship_tag: tag,
             generation,
-            is_self: false,
+            is_self: isSelfMode,
           })
           .select("id")
           .single();
@@ -315,7 +341,8 @@ const FamilyAdd = () => {
         : null;
 
       // 2. Upload the cropped face image
-      const path = `${user.id}/family/${person.id}_${Date.now()}.jpg`;
+      const folder = isSelfMode ? "self" : "family";
+      const path = `${user.id}/${folder}/${person.id}_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
         .from("face-images-raw")
         .upload(path, normalizedCropBlob, { contentType: "image/jpeg" });
@@ -365,6 +392,9 @@ const FamilyAdd = () => {
       // Invalidate persons cache so Home re-fetches immediately
       await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });
       await queryClient.invalidateQueries({ queryKey: ["family-thumbnail"] });
+      if (isSelfMode) {
+        await queryClient.invalidateQueries({ queryKey: ["self-thumbnail"] });
+      }
 
       setPhase("done");
     } catch (err) {
@@ -399,13 +429,17 @@ const FamilyAdd = () => {
         >
           <CheckCircle2 size={64} className="text-cyan" />
         </motion.div>
-        <h1 className="text-xl font-bold">{name} added!</h1>
+        <h1 className="text-xl font-bold">
+          {isSelfMode ? "Your photo is saved!" : `${name} added!`}
+        </h1>
         <button className="btn-gradient px-8 py-3" onClick={() => navigate("/home")}>
-          Back to family
+          {isSelfMode ? "Back to home" : "Back to family"}
         </button>
-        <button className="text-sm text-muted-foreground underline underline-offset-2" onClick={reset}>
-          Add another
-        </button>
+        {!isSelfMode && (
+          <button className="text-sm text-muted-foreground underline underline-offset-2" onClick={reset}>
+            Add another
+          </button>
+        )}
       </div>
     );
   }
@@ -514,7 +548,9 @@ const FamilyAdd = () => {
         transition={spring}
       >
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-center">Add family member</h1>
+          <h1 className="text-2xl font-bold text-center">
+            {isSelfMode ? "Upload your photo" : "Add family member"}
+          </h1>
           {/* Step indicator */}
           {(() => {
             const stepIdx =
@@ -579,7 +615,11 @@ const FamilyAdd = () => {
                   </div>
                   <div className="text-xs text-muted-foreground">
                     <p className="text-foreground font-medium text-sm mb-0.5">Face confirmed</p>
-                    <p>Fill in the details to save this family member.</p>
+                    <p>
+                      {isSelfMode
+                        ? "Confirm your name to save your portrait."
+                        : "Fill in the details to save this family member."}
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -632,21 +672,23 @@ const FamilyAdd = () => {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Relationship</Label>
-              <Select value={relationTag} onValueChange={setRelationTag} disabled={phase === "saving"}>
-                <SelectTrigger className="bg-white/5 border-white/10">
-                  <SelectValue placeholder="Select relationship" />
-                </SelectTrigger>
-                <SelectContent>
-                  {RELATIONSHIP_OPTIONS.map((r) => (
-                    <SelectItem key={r.tag} value={r.tag}>
-                      {r.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {!isSelfMode && (
+              <div className="space-y-2">
+                <Label>Relationship</Label>
+                <Select value={relationTag} onValueChange={setRelationTag} disabled={phase === "saving"}>
+                  <SelectTrigger className="bg-white/5 border-white/10">
+                    <SelectValue placeholder="Select relationship" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RELATIONSHIP_OPTIONS.map((r) => (
+                      <SelectItem key={r.tag} value={r.tag}>
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {errorMsg && <p className="text-xs text-destructive">{errorMsg}</p>}
 
@@ -657,7 +699,7 @@ const FamilyAdd = () => {
                 disabled={phase === "saving"}
               >
                 {phase === "saving" && <Loader2 size={16} className="animate-spin" />}
-                Save family member
+                {isSelfMode ? "Save my photo" : "Save family member"}
               </button>
               <button
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors text-center"

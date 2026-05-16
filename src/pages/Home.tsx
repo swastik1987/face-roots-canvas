@@ -13,6 +13,7 @@ import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
 import { normalizeToPortrait } from "@/lib/face/normalize";
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 import PhotoEditSheet from "@/components/PhotoEditSheet";
+import SelfPhotoSourceSheet from "@/components/SelfPhotoSourceSheet";
 import FaceCropDialog from "@/components/FaceCropDialog";
 import FaceImg from "@/components/ui/FaceImg";
 import EmptyIllustration from "@/components/ui/EmptyIllustration";
@@ -196,6 +197,9 @@ const Home = () => {
   const [cropImageUrl, setCropImageUrl] = useState("");
   const [cropPersonId, setCropPersonId] = useState<string | null>(null);
 
+  // Self photo source chooser (capture vs upload)
+  const [selfSourceOpen, setSelfSourceOpen] = useState(false);
+
   const canAnalyze = !!self && family.length >= 1;
 
   // Determine which empty slots still need to be filled based on progressive disclosure
@@ -331,11 +335,18 @@ const Home = () => {
     [user, cropPersonId, queryClient],
   );
 
-  // ── Handle family member re-upload ────────────────────────────────────────
+  // ── Handle family / self re-upload ───────────────────────────────────────
 
   const handleFamilyReupload = useCallback(
-    (file: File) => {
+    (_file: File) => {
       if (!editPerson) return;
+      // Self upload uses the self mode of /family/add so it sets is_self
+      // correctly and refreshes self-thumbnail; family uploads keep the
+      // existing tag-based replace flow.
+      if (editPerson.is_self) {
+        navigate(`/family/add?self=1&person_id=${editPerson.id}`);
+        return;
+      }
       // person_id tells FamilyAdd to replace into the existing row instead
       // of inserting a fresh one (which would orphan the old person).
       navigate(
@@ -654,7 +665,7 @@ const Home = () => {
                 self={self}
                 thumbnailUrl={selfThumbnailUrl}
                 facePosition={selfFacePosition}
-                onClick={() => navigate("/capture")}
+                onClick={() => setSelfSourceOpen(true)}
                 onEdit={() => self && openEditSheet(self, selfThumbnailUrl)}
               />
             </div>
@@ -689,7 +700,13 @@ const Home = () => {
       <div className="flex flex-col items-center gap-3 mt-8 relative z-10 bg-background/80 p-4 rounded-3xl backdrop-blur-sm border border-white/5">
         <motion.button
           className="btn-gradient px-8 py-3.5 text-base font-medium disabled:opacity-40 flex items-center gap-2 shadow-lg shadow-cyan/20"
-          onClick={canAnalyze ? startAnalysis : () => navigate("/capture")}
+          onClick={
+            canAnalyze
+              ? startAnalysis
+              : !self
+                ? () => setSelfSourceOpen(true)
+                : () => navigate("/family/add?tag=mother")
+          }
           disabled={analyzing}
           aria-busy={analyzing}
           aria-label={canAnalyze ? "Start Family DNA analysis" : "Add yourself and a family member to start"}
@@ -745,6 +762,13 @@ const Home = () => {
         onOpenChange={setCropOpen}
         imageUrl={cropImageUrl}
         onCropConfirm={handleCropConfirm}
+      />
+
+      {/* Self photo source chooser */}
+      <SelfPhotoSourceSheet
+        open={selfSourceOpen}
+        onOpenChange={setSelfSourceOpen}
+        replacePersonId={self?.id}
       />
     </main>
   );

@@ -94,19 +94,19 @@ export default function PhotoEditSheet({
             </button>
           )}
 
-          {/* Family: re-upload */}
-          {!isSelf && (
-            <button
-              onClick={handleReupload}
-              className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-white/5 transition-colors text-left"
-            >
-              <Upload size={18} className="text-cyan shrink-0" />
-              <div>
-                <p className="text-sm font-medium">Upload new photo</p>
-                <p className="text-xs text-muted-foreground">Replace with a different photo</p>
-              </div>
-            </button>
-          )}
+          {/* Upload new photo — available for both self & family */}
+          <button
+            onClick={handleReupload}
+            className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-white/5 transition-colors text-left"
+          >
+            <Upload size={18} className="text-cyan shrink-0" />
+            <div>
+              <p className="text-sm font-medium">Upload new photo</p>
+              <p className="text-xs text-muted-foreground">
+                {isSelf ? "Pick a portrait from your device" : "Replace with a different photo"}
+              </p>
+            </div>
+          </button>
 
           {/* Edit / Crop — available for both, but only if a photo exists */}
           {photoUrl && (
@@ -169,16 +169,14 @@ export default function PhotoEditSheet({
           )}
         </div>
 
-        {/* Hidden file input for re-upload */}
-        {!isSelf && (
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-        )}
+        {/* Hidden file input for re-upload (both self and family) */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
       </SheetContent>
     </Sheet>
   );
