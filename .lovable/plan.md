@@ -1,44 +1,36 @@
 ## Goal
 
-Make the exported Legacy Card show every matched facial feature (not just top 6), and present each as an expanded comparison row with side-by-side mini crops of the user and the matched relative — letting the card grow taller as needed.
+When a user uploads a photo with more than one detected face on the Family Add / Self upload flow, let them tap which face is theirs (or the relative's) before continuing to the existing crop confirmation screen with the usual "Looks good", "Adjust crop", and "Try a different photo" actions.
 
-## Changes
+## Current behavior
 
-### 1. `supabase/functions/render-legacy-card/index.ts`
-- Remove the `.limit(6)` on the `feature_matches` query so every match comes through.
-- For each match, fetch the most recent `feature_embeddings.crop_storage_path` for:
-  - the self person + that `feature_type` (user crop)
-  - the winner person + that `feature_type` (relative crop)
-- Sign each crop URL (5-min), download as base64 (jpeg/png), pass into the card. Run downloads with bounded concurrency (4 at a time) to keep cold-start time reasonable. On any failure, fall back to initials placeholder for that thumbnail.
-- Compute the dynamic canvas height based on number of matches (e.g. `headerHeight + avatarHeight + sectionHeader + rows * rowHeight + footer`) and pass it to both Satori and Resvg (`fitTo` value updated). Width stays 1080.
+In `src/pages/FamilyAdd.tsx`, after MediaPipe runs in `handleFile`, the code unconditionally takes `result.faceLandmarks[0]`, computes a bbox, crops, and jumps to the `crop` phase. Photos with multiple faces silently pick the first detected face.
 
-### 2. `supabase/functions/_shared/cards/legacyCard.ts`
-- Extend `CardMatch` with `userCropB64: string | null` and `winnerCropB64: string | null`.
-- Extend `CardData` with a computed `height: number`.
-- Replace `matchRow` with an expanded layout per feature:
-  ```
-  ┌──────────────────────────────────────────────┐
-  │ [you 140²]  vs  [relative 140²]              │
-  │  Feature name              82% ████████      │
-  │  like {RelativeName} ({relationship})        │
-  └──────────────────────────────────────────────┘
-  ```
-  - Square rounded thumbnails (140×140), gradient ring on the user's, neutral ring on the relative's, "vs" label between.
-  - Feature label + similarity bar on the right of thumbnails (or below on narrower rows — single-column stacked layout works since width is 1080).
-  - Show all matches (no slice).
-- Use the dynamic `height` from `CardData` for the outer container.
+## Proposed change (frontend only)
 
-### 3. No DB / RLS changes
-All needed data already exists (`feature_embeddings.crop_storage_path`, `feature_matches`). No migrations.
+1. **New phase**: add `"choose_face"` to the `Phase` union (between `detecting` and `crop`).
 
-### 4. Frontend
-No changes — `Share.tsx` just consumes the signed URL; a taller image renders fine inside the existing `<img>` (it scales to width).
+2. **In `handleFile`**:
+   - After detection, if `numFaces === 1`, keep today's behavior (auto-crop → `crop` phase).
+   - If `numFaces > 1`, compute a bbox for every detected face, store them all in a new `faceCandidates` state (`Array<{ index, bbox, landmarks, pose }>`), filter by the existing pose gate (skip faces that fail yaw/pitch — if all fail, show the same error as today), and set phase to `choose_face`.
+   - If `numFaces === 0`, unchanged error path.
 
-## Validation
-- After deploy, call `render-legacy-card` for an existing analysis via `curl_edge_functions`, fetch the resulting PNG, and visually QA: confirm all features rendered, both crops visible, no clipped rows, footer present at bottom.
-- Check edge function logs for crop-fetch failures.
+3. **New `choose_face` screen** (rendered inline in `FamilyAdd.tsx`, matching the existing glass-card style):
+   - Title: "Multiple faces found — pick one"
+   - Show `previewUrl` with one tappable bordered box per candidate, numbered 1..N. Tapping a box selects that face (highlight in cyan, others dim).
+   - Primary button: "Use this face" — runs the existing crop logic for the selected candidate (`cropFaceBlob` with its bbox, set `bboxPercent`, `detectionResult`, `cropBlob`, `cropUrl`) and advances to `crop`. From there the user already has "Looks good", "Adjust crop", "Try a different photo".
+   - Secondary button: "Try a different photo" → `reset()`.
+
+4. **State additions**: `faceCandidates`, `selectedFaceIndex`. Reset both in `reset()`.
+
+5. **Step indicator**: treat `choose_face` the same as `detecting` (step index 1) so the header stepper doesn't jump.
 
 ## Out of scope
-- Renaming "Family DNA Map" copy.
-- Adding the LLM verdict caption (could be a follow-up).
-- Caching crop downloads across renders.
+
+- Changing `validate-face` or any Edge Function (single-face is still what gets uploaded).
+- Changing the capture (selfie) flow — only the upload path can have multiple faces.
+- Changing the existing crop / confirm / save logic.
+
+## Files touched
+
+- `src/pages/FamilyAdd.tsx` (only).
