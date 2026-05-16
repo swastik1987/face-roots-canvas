@@ -699,7 +699,7 @@ const FamilyAdd = () => {
                 disabled={phase === "saving"}
               >
                 {phase === "saving" && <Loader2 size={16} className="animate-spin" />}
-                Save family member
+                {isSelfMode ? "Save my photo" : "Save family member"}
               </button>
               <button
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
