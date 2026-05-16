@@ -306,7 +306,7 @@ const FamilyAdd = () => {
       // index 0) operates on the chosen face.
       const singleResult: FaceLandmarkerResult = {
         ...pendingDetection,
-        faceLandmarks: [cand.landmarks],
+        faceLandmarks: [cand.landmarks as any],
         facialTransformationMatrixes: pendingDetection.facialTransformationMatrixes
           ? [pendingDetection.facialTransformationMatrixes[cand.index]].filter(Boolean) as any
           : ([] as any),
