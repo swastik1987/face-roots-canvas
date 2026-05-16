@@ -197,6 +197,9 @@ const Home = () => {
   const [cropImageUrl, setCropImageUrl] = useState("");
   const [cropPersonId, setCropPersonId] = useState<string | null>(null);
 
+  // Self photo source chooser (capture vs upload)
+  const [selfSourceOpen, setSelfSourceOpen] = useState(false);
+
   const canAnalyze = !!self && family.length >= 1;
 
   // Determine which empty slots still need to be filled based on progressive disclosure
