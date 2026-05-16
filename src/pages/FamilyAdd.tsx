@@ -235,9 +235,21 @@ const FamilyAdd = () => {
         return;
       }
 
-      // Pose gate — reject non-frontal photos before the user invests time
-      // in cropping. We check before the crop so the bbox we compute is on
-      // a head that's actually facing the camera.
+      // Multiple faces → let the user pick which one is theirs/the relative's.
+      if (numFaces > 1) {
+        const candidates: FaceCandidate[] = result.faceLandmarks.map((lms, i) => ({
+          index: i,
+          bbox: getBbox(lms, 0.2),
+          landmarks: lms,
+        }));
+        setFaceCandidates(candidates);
+        setSelectedFaceIndex(0);
+        setPendingDetection(result);
+        setPhase("choose_face");
+        return;
+      }
+
+      // Single face — original pose gate + auto-crop path.
       const pose = extractPose(result);
       if (pose) {
         if (Math.abs(pose.yaw) > FAMILY_YAW_MAX) {
@@ -260,7 +272,6 @@ const FamilyAdd = () => {
         }
       }
 
-      // Compute face bbox and crop
       const landmarks = result.faceLandmarks[0];
       const bbox = getBbox(landmarks, 0.2);
       setBboxPercent(bbox);
@@ -274,6 +285,46 @@ const FamilyAdd = () => {
     } catch (err) {
       console.error("Detection error", err);
       setErrorMsg("Could not analyse the photo. Please try another image.");
+      setPhase("error");
+    }
+  };
+
+  // ── Confirm a face from the multi-face picker ─────────────────────────────
+  const confirmChosenFace = async () => {
+    const cand = faceCandidates[selectedFaceIndex];
+    if (!cand || !previewUrl || !pendingDetection) return;
+
+    try {
+      const img = new Image();
+      img.src = previewUrl;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Image failed to load"));
+      });
+
+      // Build a single-face detection result so downstream code (which reads
+      // index 0) operates on the chosen face.
+      const singleResult: FaceLandmarkerResult = {
+        ...pendingDetection,
+        faceLandmarks: [cand.landmarks],
+        facialTransformationMatrixes: pendingDetection.facialTransformationMatrixes
+          ? [pendingDetection.facialTransformationMatrixes[cand.index]].filter(Boolean) as any
+          : ([] as any),
+        faceBlendshapes: pendingDetection.faceBlendshapes
+          ? [pendingDetection.faceBlendshapes[cand.index]].filter(Boolean) as any
+          : ([] as any),
+      };
+
+      setBboxPercent(cand.bbox);
+      setDetectionResult(singleResult);
+
+      const { blob, dataUrl } = await cropFaceBlob(img, cand.bbox);
+      setCropBlob(blob);
+      setCropUrl(dataUrl);
+      setPhase("crop");
+    } catch (err) {
+      console.error("Face selection error", err);
+      setErrorMsg("Could not use that face. Please try a different photo.");
       setPhase("error");
     }
   };
