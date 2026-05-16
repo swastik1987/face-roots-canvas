@@ -13,6 +13,7 @@ import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
 import { normalizeToPortrait } from "@/lib/face/normalize";
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 import PhotoEditSheet from "@/components/PhotoEditSheet";
+import SelfPhotoSourceSheet from "@/components/SelfPhotoSourceSheet";
 import FaceCropDialog from "@/components/FaceCropDialog";
 import FaceImg from "@/components/ui/FaceImg";
 import EmptyIllustration from "@/components/ui/EmptyIllustration";
