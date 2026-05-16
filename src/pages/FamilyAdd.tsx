@@ -429,13 +429,17 @@ const FamilyAdd = () => {
         >
           <CheckCircle2 size={64} className="text-cyan" />
         </motion.div>
-        <h1 className="text-xl font-bold">{name} added!</h1>
+        <h1 className="text-xl font-bold">
+          {isSelfMode ? "Your photo is saved!" : `${name} added!`}
+        </h1>
         <button className="btn-gradient px-8 py-3" onClick={() => navigate("/home")}>
-          Back to family
+          {isSelfMode ? "Back to home" : "Back to family"}
         </button>
-        <button className="text-sm text-muted-foreground underline underline-offset-2" onClick={reset}>
-          Add another
-        </button>
+        {!isSelfMode && (
+          <button className="text-sm text-muted-foreground underline underline-offset-2" onClick={reset}>
+            Add another
+          </button>
+        )}
       </div>
     );
   }
