@@ -169,16 +169,14 @@ export default function PhotoEditSheet({
           )}
         </div>
 
-        {/* Hidden file input for re-upload */}
-        {!isSelf && (
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-        )}
+        {/* Hidden file input for re-upload (both self and family) */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
       </SheetContent>
     </Sheet>
   );
