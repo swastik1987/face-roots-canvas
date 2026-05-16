@@ -548,7 +548,9 @@ const FamilyAdd = () => {
         transition={spring}
       >
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-center">Add family member</h1>
+          <h1 className="text-2xl font-bold text-center">
+            {isSelfMode ? "Upload your photo" : "Add family member"}
+          </h1>
           {/* Step indicator */}
           {(() => {
             const stepIdx =
