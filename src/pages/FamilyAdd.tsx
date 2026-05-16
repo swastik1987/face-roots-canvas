@@ -145,24 +145,45 @@ const FamilyAdd = () => {
     };
   }, [previewUrl]);
 
-  // Pre-fill name/relationship when re-uploading for an existing person.
+  // Effective person id to replace (explicit param OR existing self in self mode).
+  const [effectiveReplaceId, setEffectiveReplaceId] = useState<string | null>(replacePersonId);
+
+  // Pre-fill name/relationship when re-uploading for an existing person,
+  // or when in self mode (look up existing self to replace).
   useEffect(() => {
-    if (!replacePersonId) return;
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from("persons")
-        .select("display_name, relationship_tag")
-        .eq("id", replacePersonId)
-        .maybeSingle();
-      if (cancelled || !data) return;
-      setName(data.display_name ?? "");
-      setRelationTag(data.relationship_tag ?? "");
+      if (replacePersonId) {
+        const { data } = await supabase
+          .from("persons")
+          .select("display_name, relationship_tag")
+          .eq("id", replacePersonId)
+          .maybeSingle();
+        if (cancelled || !data) return;
+        setName(data.display_name ?? "");
+        setRelationTag(data.relationship_tag ?? "");
+        return;
+      }
+      if (isSelfMode && user) {
+        const { data } = await supabase
+          .from("persons")
+          .select("id, display_name")
+          .eq("owner_user_id", user.id)
+          .eq("is_self", true)
+          .maybeSingle();
+        if (cancelled) return;
+        if (data) {
+          setEffectiveReplaceId(data.id);
+          setName(data.display_name ?? "Me");
+        } else {
+          setName((prev) => prev || "Me");
+        }
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [replacePersonId]);
+  }, [replacePersonId, isSelfMode, user]);
 
   // ── File pick + detection ──────────────────────────────────────────────────
 
