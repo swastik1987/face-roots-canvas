@@ -763,6 +763,13 @@ const Home = () => {
         imageUrl={cropImageUrl}
         onCropConfirm={handleCropConfirm}
       />
+
+      {/* Self photo source chooser */}
+      <SelfPhotoSourceSheet
+        open={selfSourceOpen}
+        onOpenChange={setSelfSourceOpen}
+        replacePersonId={self?.id}
+      />
     </main>
   );
 };
