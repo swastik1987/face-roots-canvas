@@ -335,11 +335,18 @@ const Home = () => {
     [user, cropPersonId, queryClient],
   );
 
-  // ── Handle family member re-upload ────────────────────────────────────────
+  // ── Handle family / self re-upload ───────────────────────────────────────
 
   const handleFamilyReupload = useCallback(
-    (file: File) => {
+    (_file: File) => {
       if (!editPerson) return;
+      // Self upload uses the self mode of /family/add so it sets is_self
+      // correctly and refreshes self-thumbnail; family uploads keep the
+      // existing tag-based replace flow.
+      if (editPerson.is_self) {
+        navigate(`/family/add?self=1&person_id=${editPerson.id}`);
+        return;
+      }
       // person_id tells FamilyAdd to replace into the existing row instead
       // of inserting a fresh one (which would orphan the old person).
       navigate(
