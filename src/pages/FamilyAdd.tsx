@@ -139,6 +139,9 @@ const FamilyAdd = () => {
     isSelfMode ? "self" : (searchParams.get("tag") ?? ""),
   );
   const [showCropDialog, setShowCropDialog] = useState(false);
+  const [faceCandidates, setFaceCandidates] = useState<FaceCandidate[]>([]);
+  const [selectedFaceIndex, setSelectedFaceIndex] = useState<number>(0);
+  const [pendingDetection, setPendingDetection] = useState<FaceLandmarkerResult | null>(null);
   // When present, we're replacing the photo of an existing person (self or
   // family) instead of adding a new one. Skips the persons insert and re-uses
   // the existing row; the replace helper purges the old face_images + crops.
