@@ -475,6 +475,9 @@ const FamilyAdd = () => {
     setErrorMsg("");
     setName("");
     setRelationTag("");
+    setFaceCandidates([]);
+    setSelectedFaceIndex(0);
+    setPendingDetection(null);
   };
 
   // ── Done ───────────────────────────────────────────────────────────────────
