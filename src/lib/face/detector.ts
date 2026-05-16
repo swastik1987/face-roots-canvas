@@ -38,7 +38,7 @@ export async function initDetector(): Promise<void> {
 
     const options = {
       runningMode: 'IMAGE' as const,
-      numFaces: 1,
+      numFaces: 5,
       minFaceDetectionConfidence: 0.7,   // raised from 0.5 to reduce background false-positives
       minFacePresenceConfidence: 0.7,
       minTrackingConfidence: 0.6,
