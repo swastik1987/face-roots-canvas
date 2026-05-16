@@ -46,7 +46,13 @@ const RELATIONSHIP_OPTIONS = [
   { label: "Other", tag: "other", generation: 0 },
 ];
 
-type Phase = "pick" | "detecting" | "crop" | "confirm" | "saving" | "done" | "error";
+type Phase = "pick" | "detecting" | "choose_face" | "crop" | "confirm" | "saving" | "done" | "error";
+
+type FaceCandidate = {
+  index: number;
+  bbox: { x: number; y: number; w: number; h: number };
+  landmarks: Array<{ x: number; y: number; z: number }>;
+};
 
 // Near-frontal gate for family uploads. Capture.tsx uses a stricter 8°
 // threshold for live self-capture; for static photo uploads we allow a
@@ -133,6 +139,9 @@ const FamilyAdd = () => {
     isSelfMode ? "self" : (searchParams.get("tag") ?? ""),
   );
   const [showCropDialog, setShowCropDialog] = useState(false);
+  const [faceCandidates, setFaceCandidates] = useState<FaceCandidate[]>([]);
+  const [selectedFaceIndex, setSelectedFaceIndex] = useState<number>(0);
+  const [pendingDetection, setPendingDetection] = useState<FaceLandmarkerResult | null>(null);
   // When present, we're replacing the photo of an existing person (self or
   // family) instead of adding a new one. Skips the persons insert and re-uses
   // the existing row; the replace helper purges the old face_images + crops.
@@ -226,9 +235,21 @@ const FamilyAdd = () => {
         return;
       }
 
-      // Pose gate — reject non-frontal photos before the user invests time
-      // in cropping. We check before the crop so the bbox we compute is on
-      // a head that's actually facing the camera.
+      // Multiple faces → let the user pick which one is theirs/the relative's.
+      if (numFaces > 1) {
+        const candidates: FaceCandidate[] = result.faceLandmarks.map((lms, i) => ({
+          index: i,
+          bbox: getBbox(lms, 0.2),
+          landmarks: lms,
+        }));
+        setFaceCandidates(candidates);
+        setSelectedFaceIndex(0);
+        setPendingDetection(result);
+        setPhase("choose_face");
+        return;
+      }
+
+      // Single face — original pose gate + auto-crop path.
       const pose = extractPose(result);
       if (pose) {
         if (Math.abs(pose.yaw) > FAMILY_YAW_MAX) {
@@ -251,7 +272,6 @@ const FamilyAdd = () => {
         }
       }
 
-      // Compute face bbox and crop
       const landmarks = result.faceLandmarks[0];
       const bbox = getBbox(landmarks, 0.2);
       setBboxPercent(bbox);
@@ -265,6 +285,46 @@ const FamilyAdd = () => {
     } catch (err) {
       console.error("Detection error", err);
       setErrorMsg("Could not analyse the photo. Please try another image.");
+      setPhase("error");
+    }
+  };
+
+  // ── Confirm a face from the multi-face picker ─────────────────────────────
+  const confirmChosenFace = async () => {
+    const cand = faceCandidates[selectedFaceIndex];
+    if (!cand || !previewUrl || !pendingDetection) return;
+
+    try {
+      const img = new Image();
+      img.src = previewUrl;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Image failed to load"));
+      });
+
+      // Build a single-face detection result so downstream code (which reads
+      // index 0) operates on the chosen face.
+      const singleResult: FaceLandmarkerResult = {
+        ...pendingDetection,
+        faceLandmarks: [cand.landmarks as any],
+        facialTransformationMatrixes: pendingDetection.facialTransformationMatrixes
+          ? [pendingDetection.facialTransformationMatrixes[cand.index]].filter(Boolean) as any
+          : ([] as any),
+        faceBlendshapes: pendingDetection.faceBlendshapes
+          ? [pendingDetection.faceBlendshapes[cand.index]].filter(Boolean) as any
+          : ([] as any),
+      };
+
+      setBboxPercent(cand.bbox);
+      setDetectionResult(singleResult);
+
+      const { blob, dataUrl } = await cropFaceBlob(img, cand.bbox);
+      setCropBlob(blob);
+      setCropUrl(dataUrl);
+      setPhase("crop");
+    } catch (err) {
+      console.error("Face selection error", err);
+      setErrorMsg("Could not use that face. Please try a different photo.");
       setPhase("error");
     }
   };
@@ -415,6 +475,9 @@ const FamilyAdd = () => {
     setErrorMsg("");
     setName("");
     setRelationTag("");
+    setFaceCandidates([]);
+    setSelectedFaceIndex(0);
+    setPendingDetection(null);
   };
 
   // ── Done ───────────────────────────────────────────────────────────────────
@@ -440,6 +503,81 @@ const FamilyAdd = () => {
             Add another
           </button>
         )}
+      </div>
+    );
+  }
+
+  // ── Multi-face picker ──────────────────────────────────────────────────────
+
+  if (phase === "choose_face") {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen px-6 py-12 gap-6">
+        <motion.div
+          className="glass-card p-6 w-full max-w-sm space-y-5"
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={spring}
+        >
+          <div className="space-y-1">
+            <h1 className="text-lg font-bold">Multiple faces found</h1>
+            <p className="text-sm text-muted-foreground">
+              Tap the face you want to use{isSelfMode ? "" : " for this family member"}.
+            </p>
+          </div>
+
+          <div className="relative rounded-xl overflow-hidden bg-black">
+            <img src={previewUrl} alt="Original" className="w-full h-auto block" />
+            {faceCandidates.map((c, i) => {
+              const selected = i === selectedFaceIndex;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setSelectedFaceIndex(i)}
+                  className="absolute group"
+                  style={{
+                    left: `${c.bbox.x * 100}%`,
+                    top: `${c.bbox.y * 100}%`,
+                    width: `${c.bbox.w * 100}%`,
+                    height: `${c.bbox.h * 100}%`,
+                  }}
+                  aria-label={`Select face ${i + 1}`}
+                >
+                  <span
+                    className={`absolute inset-0 border-2 rounded-md transition-all ${
+                      selected
+                        ? "border-cyan shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]"
+                        : "border-white/60 hover:border-white"
+                    }`}
+                  />
+                  <span
+                    className={`absolute -top-2 -left-2 w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center ${
+                      selected ? "bg-cyan text-black" : "bg-white/80 text-black"
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <button
+              className="btn-gradient w-full py-3 text-sm font-medium"
+              onClick={confirmChosenFace}
+            >
+              Use face #{selectedFaceIndex + 1}
+            </button>
+            <button
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-white/10 text-sm text-muted-foreground hover:bg-white/5 transition-colors"
+              onClick={reset}
+            >
+              <RotateCcw size={14} />
+              Try a different photo
+            </button>
+          </div>
+        </motion.div>
       </div>
     );
   }
