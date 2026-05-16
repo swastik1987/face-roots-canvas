@@ -70,7 +70,9 @@ export async function initDetector(): Promise<void> {
  */
 export async function setRunningMode(mode: 'IMAGE' | 'VIDEO'): Promise<void> {
   if (!landmarker) await initDetector();
-  await landmarker!.setOptions({ runningMode: mode });
+  // VIDEO (live capture) tracks a single face; IMAGE (uploads) may contain
+  // multiple people and we want to surface them all to the picker.
+  await landmarker!.setOptions({ runningMode: mode, numFaces: mode === 'VIDEO' ? 1 : 5 });
 }
 
 /**
