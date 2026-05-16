@@ -693,7 +693,7 @@ const FamilyAdd = () => {
           {(() => {
             const stepIdx =
               phase === 'pick' || phase === 'error' ? 0
-              : phase === 'detecting' || phase === 'choose_face' ? 1
+              : phase === 'detecting' ? 1
               : phase === 'confirm' ? 2
               : phase === 'saving' ? 3
               : 0;
