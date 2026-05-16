@@ -46,7 +46,13 @@ const RELATIONSHIP_OPTIONS = [
   { label: "Other", tag: "other", generation: 0 },
 ];
 
-type Phase = "pick" | "detecting" | "crop" | "confirm" | "saving" | "done" | "error";
+type Phase = "pick" | "detecting" | "choose_face" | "crop" | "confirm" | "saving" | "done" | "error";
+
+type FaceCandidate = {
+  index: number;
+  bbox: { x: number; y: number; w: number; h: number };
+  landmarks: Array<{ x: number; y: number; z: number }>;
+};
 
 // Near-frontal gate for family uploads. Capture.tsx uses a stricter 8°
 // threshold for live self-capture; for static photo uploads we allow a
