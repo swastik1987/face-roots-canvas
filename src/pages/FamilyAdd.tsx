@@ -507,6 +507,81 @@ const FamilyAdd = () => {
     );
   }
 
+  // ── Multi-face picker ──────────────────────────────────────────────────────
+
+  if (phase === "choose_face") {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen px-6 py-12 gap-6">
+        <motion.div
+          className="glass-card p-6 w-full max-w-sm space-y-5"
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={spring}
+        >
+          <div className="space-y-1">
+            <h1 className="text-lg font-bold">Multiple faces found</h1>
+            <p className="text-sm text-muted-foreground">
+              Tap the face you want to use{isSelfMode ? "" : " for this family member"}.
+            </p>
+          </div>
+
+          <div className="relative rounded-xl overflow-hidden bg-black">
+            <img src={previewUrl} alt="Original" className="w-full h-auto block" />
+            {faceCandidates.map((c, i) => {
+              const selected = i === selectedFaceIndex;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setSelectedFaceIndex(i)}
+                  className="absolute group"
+                  style={{
+                    left: `${c.bbox.x * 100}%`,
+                    top: `${c.bbox.y * 100}%`,
+                    width: `${c.bbox.w * 100}%`,
+                    height: `${c.bbox.h * 100}%`,
+                  }}
+                  aria-label={`Select face ${i + 1}`}
+                >
+                  <span
+                    className={`absolute inset-0 border-2 rounded-md transition-all ${
+                      selected
+                        ? "border-cyan shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]"
+                        : "border-white/60 hover:border-white"
+                    }`}
+                  />
+                  <span
+                    className={`absolute -top-2 -left-2 w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center ${
+                      selected ? "bg-cyan text-black" : "bg-white/80 text-black"
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <button
+              className="btn-gradient w-full py-3 text-sm font-medium"
+              onClick={confirmChosenFace}
+            >
+              Use face #{selectedFaceIndex + 1}
+            </button>
+            <button
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-white/10 text-sm text-muted-foreground hover:bg-white/5 transition-colors"
+              onClick={reset}
+            >
+              <RotateCcw size={14} />
+              Try a different photo
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   // ── Crop confirmation screen ───────────────────────────────────────────────
 
   if (phase === "crop") {
