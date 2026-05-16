@@ -700,7 +700,13 @@ const Home = () => {
       <div className="flex flex-col items-center gap-3 mt-8 relative z-10 bg-background/80 p-4 rounded-3xl backdrop-blur-sm border border-white/5">
         <motion.button
           className="btn-gradient px-8 py-3.5 text-base font-medium disabled:opacity-40 flex items-center gap-2 shadow-lg shadow-cyan/20"
-          onClick={canAnalyze ? startAnalysis : () => setSelfSourceOpen(true)}
+          onClick={
+            canAnalyze
+              ? startAnalysis
+              : !self
+                ? () => setSelfSourceOpen(true)
+                : () => navigate("/family/add?tag=mother")
+          }
           disabled={analyzing}
           aria-busy={analyzing}
           aria-label={canAnalyze ? "Start Family DNA analysis" : "Add yourself and a family member to start"}
