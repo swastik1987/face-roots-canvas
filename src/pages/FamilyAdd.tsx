@@ -287,19 +287,21 @@ const FamilyAdd = () => {
 
     try {
       const rel = RELATIONSHIP_OPTIONS.find((r) => r.tag === relationTag);
-      const generation = rel?.generation ?? 0;
+      const generation = isSelfMode ? 0 : (rel?.generation ?? 0);
+      const tag = isSelfMode ? "self" : relationTag;
 
       // Replace mode: re-use the existing person row; otherwise insert a new one.
       let person: { id: string };
-      if (replacePersonId) {
+      const replaceId = effectiveReplaceId;
+      if (replaceId) {
         const { data: updated, error: ue } = await supabase
           .from("persons")
           .update({
             display_name: name.trim(),
-            relationship_tag: relationTag,
+            relationship_tag: tag,
             generation,
           })
-          .eq("id", replacePersonId)
+          .eq("id", replaceId)
           .eq("owner_user_id", user.id)
           .select("id")
           .single();
@@ -311,9 +313,9 @@ const FamilyAdd = () => {
           .insert({
             owner_user_id: user.id,
             display_name: name.trim(),
-            relationship_tag: relationTag,
+            relationship_tag: tag,
             generation,
-            is_self: false,
+            is_self: isSelfMode,
           })
           .select("id")
           .single();
