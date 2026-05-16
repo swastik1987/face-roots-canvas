@@ -341,7 +341,8 @@ const FamilyAdd = () => {
         : null;
 
       // 2. Upload the cropped face image
-      const path = `${user.id}/family/${person.id}_${Date.now()}.jpg`;
+      const folder = isSelfMode ? "self" : "family";
+      const path = `${user.id}/${folder}/${person.id}_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
         .from("face-images-raw")
         .upload(path, normalizedCropBlob, { contentType: "image/jpeg" });
