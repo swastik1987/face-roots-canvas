@@ -665,7 +665,7 @@ const Home = () => {
                 self={self}
                 thumbnailUrl={selfThumbnailUrl}
                 facePosition={selfFacePosition}
-                onClick={() => navigate("/capture")}
+                onClick={() => setSelfSourceOpen(true)}
                 onEdit={() => self && openEditSheet(self, selfThumbnailUrl)}
               />
             </div>
