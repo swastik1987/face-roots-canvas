@@ -615,7 +615,11 @@ const FamilyAdd = () => {
                   </div>
                   <div className="text-xs text-muted-foreground">
                     <p className="text-foreground font-medium text-sm mb-0.5">Face confirmed</p>
-                    <p>Fill in the details to save this family member.</p>
+                    <p>
+                      {isSelfMode
+                        ? "Confirm your name to save your portrait."
+                        : "Fill in the details to save this family member."}
+                    </p>
                   </div>
                 </div>
               ) : (
