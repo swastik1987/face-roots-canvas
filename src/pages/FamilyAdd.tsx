@@ -392,6 +392,9 @@ const FamilyAdd = () => {
       // Invalidate persons cache so Home re-fetches immediately
       await queryClient.invalidateQueries({ queryKey: ["persons", user.id] });
       await queryClient.invalidateQueries({ queryKey: ["family-thumbnail"] });
+      if (isSelfMode) {
+        await queryClient.invalidateQueries({ queryKey: ["self-thumbnail"] });
+      }
 
       setPhase("done");
     } catch (err) {
