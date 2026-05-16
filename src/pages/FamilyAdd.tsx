@@ -672,21 +672,23 @@ const FamilyAdd = () => {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Relationship</Label>
-              <Select value={relationTag} onValueChange={setRelationTag} disabled={phase === "saving"}>
-                <SelectTrigger className="bg-white/5 border-white/10">
-                  <SelectValue placeholder="Select relationship" />
-                </SelectTrigger>
-                <SelectContent>
-                  {RELATIONSHIP_OPTIONS.map((r) => (
-                    <SelectItem key={r.tag} value={r.tag}>
-                      {r.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {!isSelfMode && (
+              <div className="space-y-2">
+                <Label>Relationship</Label>
+                <Select value={relationTag} onValueChange={setRelationTag} disabled={phase === "saving"}>
+                  <SelectTrigger className="bg-white/5 border-white/10">
+                    <SelectValue placeholder="Select relationship" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RELATIONSHIP_OPTIONS.map((r) => (
+                      <SelectItem key={r.tag} value={r.tag}>
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {errorMsg && <p className="text-xs text-destructive">{errorMsg}</p>}
 
