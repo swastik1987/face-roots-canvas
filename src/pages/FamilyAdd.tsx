@@ -128,11 +128,14 @@ const FamilyAdd = () => {
   const [detectionResult, setDetectionResult] = useState<FaceLandmarkerResult | null>(null);
   const [bboxPercent, setBboxPercent] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [name, setName] = useState("");
-  const [relationTag, setRelationTag] = useState(searchParams.get("tag") ?? "");
+  const isSelfMode = searchParams.get("self") === "1";
+  const [relationTag, setRelationTag] = useState(
+    isSelfMode ? "self" : (searchParams.get("tag") ?? ""),
+  );
   const [showCropDialog, setShowCropDialog] = useState(false);
-  // When present, we're replacing the photo of an existing family member
-  // instead of adding a new one. Skips the persons insert and re-uses the
-  // existing row; the replace helper purges the old face_images + crops.
+  // When present, we're replacing the photo of an existing person (self or
+  // family) instead of adding a new one. Skips the persons insert and re-uses
+  // the existing row; the replace helper purges the old face_images + crops.
   const replacePersonId = searchParams.get("person_id");
 
   // Cleanup object URLs on unmount
