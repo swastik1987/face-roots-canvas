@@ -50,7 +50,7 @@ const Splash = () => {
     <div className="flex flex-col min-h-screen overflow-x-hidden">
 
       {/* ── Hero ─────────────────────────────────────────────────────────────── */}
-      <section className="relative flex flex-col items-center justify-center min-h-screen px-6 text-center gap-5 overflow-hidden">
+      <section className="relative flex-col min-h-screen px-6 text-center gap-5 overflow-hidden flex items-center justify-start py-[24px]">
         {/* Ambient glows */}
         <div className="absolute -top-40 -left-40 w-[480px] h-[480px] rounded-full bg-cyan/8 blur-3xl pointer-events-none" />
         <div className="absolute -bottom-40 -right-40 w-[480px] h-[480px] rounded-full bg-fuchsia-500/8 blur-3xl pointer-events-none" />
