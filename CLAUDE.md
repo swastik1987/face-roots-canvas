@@ -45,8 +45,8 @@
 | Camera | `react-webcam` + custom overlay | Guided frame |
 | Auth / DB / Storage | Supabase (self-hosted free tier to start) | Magic link + Google OAuth |
 | Vector DB | Supabase pgvector | HNSW indexes |
-| Face embeddings (holistic) | InsightFace `buffalo_l` (ArcFace, 512-dim) | Via Replicate (not used in matching pipeline) |
-| Feature embeddings (per-crop) | CLIP ViT-L/14 (768-dim) | Via Replicate (`andreasjansson/clip-features`) |
+| Face embeddings (holistic) | InsightFace `buffalo_l` (ArcFace, 512-dim) | Table `face_embeddings` retained for schema compatibility but **never populated and never queried**. No server pipeline writes to it. |
+| Feature embeddings (per-crop) | **CLIP ViT-B/32 (512-dim), client-side** via `@huggingface/transformers` (ONNX, q8-quantized, ~22 MB) | Model ID `Xenova/clip-vit-base-patch32`, version string `clip-vit-base-patch32-onnx-q8`. No Replicate, no paid API — images never leave the device for embedding. |
 | LLM narration | Google Gemini 2.5 Flash (vision) | Cheap, fast, zero-retention flag on |
 | Share card rendering | Satori + resvg-js (in Edge Function) | Server-generated PNG |
 | Analytics | PostHog | Funnels, session replay |
@@ -75,25 +75,24 @@
 │  ├── Postgres + pgvector (HNSW)                          │
 │  ├── Row-Level Security                                  │
 │  └── Edge Functions (Deno):                              │
-│      ├── validate-face                                   │
-│      ├── embed-face (InsightFace holistic, not called)    │
-│      ├── embed-features (CLIP per-crop, 768-dim)         │
-│      ├── run-analysis (orchestrator)                     │
-│      ├── match-features (pgvector cosine)                │
-│      ├── narrate-matches (Gemini vision)                 │
-│      ├── render-legacy-card (Satori → PNG)               │
-│      └── delete-my-data (DPDP right-to-erasure)          │
+│      ├── validate-face         (post-upload trust check) │
+│      ├── run-analysis          (orchestrator)            │
+│      ├── match-features        (pgvector cosine RPC)     │
+│      ├── narrate-matches       (Gemini 2.5 Flash vision) │
+│      ├── render-legacy-card    (Satori → PNG)            │
+│      └── delete-my-data        (DPDP right-to-erasure)   │
 └───────────────┬──────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────┐
 │  External APIs (all zero-retention where supported)      │
-│  ├── Replicate — CLIP (andreasjansson/clip-features)     │
 │  ├── Google AI Studio — Gemini 2.5 Flash Vision          │
-│  └── (optional) Cloudflare R2 — cold storage             │
+│  └── HuggingFace CDN   — CLIP ONNX weights (one-time DL) │
 └──────────────────────────────────────────────────────────┘
 ```
 
-**Principle:** landmarks, pose validation, and feature cropping run fully client-side in MediaPipe WASM. Only cropped feature PNGs leave the device. Raw portraits can be optionally stored (default: 7-day TTL, then purged).
+**Principle:** landmarks, pose validation, feature cropping, **and CLIP embedding** all run fully client-side (MediaPipe WASM + Transformers.js ONNX). Crop PNGs are uploaded to Storage, embeddings are inserted directly into `feature_embeddings` by the browser. Only the cropped feature PNGs + embeddings leave the device — raw full portraits stay optional with a default 7-day TTL.
+
+**What was removed:** the `embed-face` and `embed-features` Edge Functions have been deleted. The Replicate dependency is gone end-to-end. `face_embeddings` rows are never written.
 
 ---
 
@@ -128,10 +127,13 @@ create table persons (
   -- 0=self, +1=parent, +2=grandparent, -1=child
   is_self boolean not null default false,
   birth_year_approx int,
-  created_at timestamptz default now(),
-  constraint one_self_per_user unique (owner_user_id, is_self)
-    deferrable initially deferred
+  created_at timestamptz default now()
 );
+-- Uniqueness is enforced by a PARTIAL index (migration 0008) — not a table
+-- constraint — so that a user can add unlimited non-self persons while still
+-- having at most one is_self=true row:
+--   create unique index persons_one_self_per_user
+--     on persons (owner_user_id) where is_self = true;
 create index on persons (owner_user_id);
 
 -- Raw face images (bucket: face-images, encrypted, TTL lifecycle)
@@ -160,33 +162,34 @@ create table face_landmarks (
   created_at timestamptz default now()
 );
 
--- Holistic face embedding (one per face_image, from InsightFace)
--- NOTE: Not currently used in the matching pipeline. Only feature_embeddings matter.
+-- Holistic face embedding (dormant — table exists but is never written/read)
+-- Kept so re-introducing a holistic pipeline later doesn't require a migration.
 create table face_embeddings (
   id uuid primary key default gen_random_uuid(),
   person_id uuid not null references persons(id) on delete cascade,
   face_image_id uuid not null references face_images(id) on delete cascade,
-  embedding vector(512) not null,   -- ArcFace buffalo_l
-  quality_score float,              -- InsightFace face quality
-  model_version text not null,      -- e.g. 'buffalo_l@2024-02'
+  embedding vector(512) not null,
+  quality_score float,
+  model_version text not null,
   created_at timestamptz default now()
 );
 create index on face_embeddings using hnsw (embedding vector_cosine_ops);
 create index on face_embeddings (person_id);
 
--- Per-feature crops → CLIP embeddings (the matchable data)
+-- Per-feature crops → CLIP embeddings (the matchable data).
+-- Rows are inserted from the BROWSER after client-side Transformers.js embedding.
 create table feature_embeddings (
   id uuid primary key default gen_random_uuid(),
   person_id uuid not null references persons(id) on delete cascade,
   face_image_id uuid not null references face_images(id) on delete cascade,
   feature_type text not null,
   -- 'eyes_left'|'eyes_right'|'nose'|'mouth'|'jawline'|'forehead'
-  -- |'eyebrows_left'|'eyebrows_right'|'ear_left'|'ear_right'
-  -- |'hairline'|'face_shape'
+  -- |'eyebrows_left'|'eyebrows_right'|'face_shape'
+  -- (ear_left/ear_right reserved for a future side-profile pass — not written today)
   crop_storage_path text,
-  embedding vector(768) not null,   -- CLIP ViT-L/14
+  embedding vector(512) not null,   -- CLIP ViT-B/32, L2-normalized
   quality_score float,
-  model_version text not null,      -- e.g. 'clip-vit-large-patch14@2024-01'
+  model_version text not null,      -- 'clip-vit-base-patch32-onnx-q8'
   created_at timestamptz default now()
 );
 create index on feature_embeddings using hnsw (embedding vector_cosine_ops);
@@ -200,7 +203,9 @@ create table analyses (
   status text not null default 'pending'
     check (status in ('pending','embedding','matching','narrating','rendering','done','failed')),
   error_message text,
-  model_versions jsonb,  -- {face: '...', features: '...', llm: '...'}
+  model_versions jsonb,     -- {face: '...', features: '...', llm: '...'} from MODEL_VERSIONS
+  card_storage_path text,   -- migration 0006 — legacy-cards bucket path for the rendered PNG
+  is_stale boolean not null default false,  -- migration 0013 — set true when underlying face images are replaced; results UI prompts "re-run"
   started_at timestamptz default now(),
   completed_at timestamptz
 );
@@ -239,7 +244,58 @@ create table rate_limit_events (
   created_at timestamptz default now()
 );
 create index on rate_limit_events (user_id, action, created_at desc);
+
+-- Verdict cache (migration 0005): avoid re-billing Gemini for identical crop pairs.
+-- Keyed by sha256 of the two CROP BYTES (content hash, not storage path).
+create table verdict_cache (
+  user_crop_hash   text not null,
+  winner_crop_hash text not null,
+  feature_type     text not null,
+  verdict          text not null,
+  model_version    text not null default 'gemini-2.5-flash',
+  created_at       timestamptz default now(),
+  primary key (user_crop_hash, winner_crop_hash, feature_type)
+);
+-- RLS enabled with no policies; only the service role (Edge Functions) touches it.
+
+-- Sibling Mode stub (migration 0007) — UI-only today, deltas populated Phase 8+.
+create table sibling_analyses (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  analysis_a_id uuid not null references analyses(id) on delete cascade,
+  analysis_b_id uuid not null references analyses(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending','processing','done','error')),
+  error_message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (owner_user_id, analysis_a_id, analysis_b_id)
+);
+create table sibling_feature_deltas (
+  id uuid primary key default gen_random_uuid(),
+  sibling_analysis_id uuid not null references sibling_analyses(id) on delete cascade,
+  feature_type text not null,
+  shared_person_id uuid not null references persons(id),
+  similarity_a real not null,
+  similarity_b real not null,
+  delta real generated always as (similarity_a - similarity_b) stored,
+  created_at timestamptz not null default now()
+);
 ```
+
+### 4.1a Matching RPC — `match_feature_embeddings`
+
+Defined as `SECURITY DEFINER` (migration 0011) so Edge Functions using the
+service role can bypass RLS on `feature_embeddings`. Final shape after
+migrations 0012 + 0013:
+
+- Accepts a 512-dim query embedding.
+- Restricts to **front-angle face_images only** via join to `face_images`.
+- For each candidate `person_id`, picks the **single most recent** front
+  face_image using `DISTINCT ON (person_id) ... ORDER BY created_at DESC`,
+  so any stale duplicate from a partial cleanup cannot skew results.
+- Returns `(person_id, similarity)` where similarity is the mean cosine
+  similarity across that one image's feature embeddings.
+- Granted to both `authenticated` and `service_role`.
 
 ### 4.2 RLS policy pattern
 
@@ -276,62 +332,50 @@ All access via signed URLs with ≤15 min expiry. Bucket policies mirror table R
 
 All Deno, located in `supabase/functions/<name>/index.ts`. Shared code in `supabase/functions/_shared/`. Every function: validates JWT, checks rate limits, logs to Sentry, returns typed JSON.
 
+Deployed functions (only these six exist on disk):
+`validate-face`, `run-analysis`, `match-features`, `narrate-matches`,
+`render-legacy-card`, `delete-my-data`. There is **no** `embed-face` or
+`embed-features` function — embedding has moved to the client.
+
 ### 5.1 `validate-face`
 **Input:** `{ face_image_id }` (image already uploaded by client)
 **Output:** `{ valid: boolean, reason?: string, face_confidence: number, nsfw_score: number }`
-**Logic:** Download image → run server-side face detection (Replicate `retinaface` or similar, as a trust check on client claim) → run NSFW classifier → write scores to `face_images` → return verdict. Reject if `face_confidence < 0.85`, `nsfw_score > 0.3`, or no face found.
+**Logic:** Verifies ownership via join to `persons`, checks stored `width/height ≥ 400` and object size ≤ 10 MB via storage HEAD, then re-reads `face_confidence` / `nsfw_score` that the **client** wrote when MediaPipe ran. No server-side face detection, no Replicate call. Fails closed if the client didn't stamp the scores. Thresholds: `face_confidence ≥ 0.85`, `nsfw_score ≤ 0.3`. A browser NSFW ONNX model is a TODO.
 
-### 5.2 `embed-face` (currently unused)
-**Input:** `{ face_image_id }`
-**Output:** `{ embedding_id }`
-**Logic:** Fetch image → call Replicate InsightFace (`buffalo_l`) → store 512-dim vector with `model_version`. Idempotent: returns existing row if one exists for this image.
-**Note:** This function exists but is no longer called by `run-analysis`. The matching pipeline only uses `feature_embeddings`, not `face_embeddings`. Skipping this removes a failure point and speeds up the pipeline.
-
-### 5.3 `embed-features`
-**Input:** `{ face_image_id, crops: [{feature_type, storage_path}, ...] }`
-**Output:** `{ count }`
-**Logic:** For each crop, call CLIP (`andreasjansson/clip-features` on Replicate, ViT-L/14), store 768-dim vector in `feature_embeddings`. Fans out with `Promise.all` but caps concurrency at 4. Retries with exponential backoff (max 3). Inter-function calls use a 120s AbortController timeout to prevent hangs.
-
-### 5.4 `run-analysis` (orchestrator)
+### 5.2 `run-analysis` (orchestrator)
 **Input:** `{ self_person_id }`
 **Output:** `{ analysis_id }` — client subscribes via Supabase Realtime for status updates
 **Logic:**
-1. Create `analyses` row with status=`pending`
-2. Verify self has ≥1 front angle image with embeddings
-3. Verify ≥1 family member has embeddings
-4. Advance status → `matching` → call match logic (§5.5)
-5. Advance status → `narrating` → call narration (§5.6)
-6. Advance status → `rendering` → call legacy card render (§5.7)
-7. Mark `done` with `completed_at` and `model_versions`
+1. **Consent pre-check** — read the latest `consent_events` row for this user. Refuse if missing, if `event_type='revoked'`, or if `scopes.embeddings !== true`.
+2. Verify `self_person_id` is owned by the caller and has `is_self=true`.
+3. Verify the self person has ≥1 `face_images` row and that at least one non-self person does too.
+4. Insert `analyses` row with status `pending` and respond immediately with `analysis_id`.
+5. Pipeline runs via `EdgeRuntime.waitUntil(...)`. Stages:
+   - `embedding` — **no server work**; verifies `feature_embeddings` already exist for self + at least one family member (the client inserted them before calling run-analysis). If self embeddings are missing, it inspects `face_images` / `face_landmarks` to report a specific reason ("Face landmarks are missing…" vs "Feature crops or embeddings could not be generated…").
+   - `matching` → POSTs to `match-features`.
+   - `narrating` → POSTs to `narrate-matches`.
+   - `rendering` → POSTs to `render-legacy-card`; **failure is non-fatal** (card can be re-rendered on demand from the Share page).
+   - `done` — stamps `completed_at` and `model_versions = MODEL_VERSIONS` (§5-shared).
+6. Any failure sets `status='failed'` with `error_message`.
+7. Sibling Edge Functions are called with the caller's JWT (so `requireAuth` passes) using a 120 s `AbortController` timeout per call.
+8. Rate limiting is scaffolded but **currently disabled** via a TODO (`checkRateLimit` from `_shared/rateLimit.ts`) — re-enable before production.
 
-Wraps everything in a try/catch that sets status=`failed` with `error_message` on any error.
-
-### 5.5 `match-features`
+### 5.3 `match-features`
 **Input:** `{ analysis_id }`
 **Output:** `{ matches_written: number }`
-**Logic:** For each feature_type the self has across all 3 angles:
-```sql
-select person_id, avg(1 - (embedding <=> $user_avg)) as similarity
-from feature_embeddings
-where person_id in (select id from persons where owner_user_id = $user and not is_self)
-  and feature_type = $feature
-group by person_id
-order by similarity desc
-limit 5;
-```
-Uses the **mean embedding** across the self's 3 angles for robustness. Writes top-1 as winner + up to 4 runners-up. Computes `winner_confidence` from the std-dev across angles (tight cluster = high confidence).
+**Logic:** Loads the self's `feature_embeddings` rows joined to `face_images` filtered to `angle='front'`. Groups by `feature_type`, computes the mean 512-dim embedding, and calls the `match_feature_embeddings` RPC (§4.1a) with the top-N = 5. Parses pgvector values whether returned as a string `"[...]"` or as an array. For each feature: writes the top-1 as winner + up to 4 runners-up to `feature_matches` via `upsert(onConflict='analysis_id,feature_type')`. `winner_confidence = max(0, 1 − stddev(similarities))` across the returned top-N (tight cluster ⇒ high confidence). Logs (does not fail) when self vs family rows mix `model_version`.
 
-### 5.6 `narrate-matches`
+### 5.4 `narrate-matches`
 **Input:** `{ analysis_id }`
 **Output:** `{ narrated: number }`
-**Logic:** For each `feature_match`, send two cropped images (user's + winner's) to Gemini 2.5 Flash with the locked system prompt (§9.2). Cache verdicts by `(user_crop_hash, winner_crop_hash)` to avoid re-billing. Write `llm_verdict` back to `feature_matches`.
+**Logic:** For each `feature_match` without an `llm_verdict`: fetch the two crop bytes via signed URL, hash them with SHA-256, and look up `verdict_cache` by `(user_crop_hash, winner_crop_hash, feature_type)` — cache is **content-hashed**, not path-hashed, so identical crops hit cache across re-captures. On miss, call Gemini 2.5 Flash with the locked system prompt (§9.1). Run the regex deny-list post-filter (§9.3); on match, fall back to the template. Write verdict back to `feature_matches` and into `verdict_cache`.
 
-### 5.7 `render-legacy-card`
+### 5.5 `render-legacy-card`
 **Input:** `{ analysis_id }`
 **Output:** `{ signed_url }`
-**Logic:** Compose 1080×1920 PNG via Satori (React-to-SVG) → resvg-js (SVG→PNG). Upload to `legacy-cards` bucket, return 15-min signed URL.
+**Logic:** Compose 1080×1920 PNG via Satori (React-to-SVG) → resvg-js (SVG→PNG). Upload to `legacy-cards` bucket, store the object path on `analyses.card_storage_path`, and return a 15-min signed URL.
 
-### 5.8 `delete-my-data`
+### 5.6 `delete-my-data`
 **Input:** (authed, no body)
 **Output:** `{ deleted: {tables: count, storage: count} }`
 **Logic:** Hard-delete from all tables (cascades handle most), purge all storage objects for user, write one final `consent_events` row with `event_type='revoked'` then delete the profile. Returns receipt.
@@ -367,34 +411,63 @@ export const FACE_REGIONS = {
 ```
 Cropping: compute bounding box from landmark indices, pad 15%, resize to 224×224 square, export as PNG blob.
 
-### 6.3 3-angle capture flow
-Single screen, three sequential steps, one camera stream. State machine:
+### 6.3 Front-only capture flow
+The 3-angle flow was dropped in favour of a single front capture. The side
+profiles weren't adding signal and they tripled the failure surface. The
+RPC is hard-coded to `angle='front'` (§4.1a), so left/right captures would
+be ignored anyway.
+
+Single screen, single step, one camera stream. State machine (see `src/pages/Capture.tsx`):
 
 ```
-idle → detecting_front → captured_front →
-      detecting_left  → captured_left  →
-      detecting_right → captured_right → done
+loading → detecting_front → captured_front → uploading → done
+                                                       ↘ error
 ```
 
-Advance rules:
-- **Front:** `|yaw| < 5° && |pitch| < 5°` stable for 1.5s
-- **Left:** `yaw ∈ [+45°, +75°]` stable for 1.5s
-- **Right:** `yaw ∈ [-75°, -45°]` stable for 1.5s
-- Face must fill ≥15% of frame
-- Blur score (Laplacian variance) ≥ 100
+Advance rules (constants in `Capture.tsx`):
+- `|yaw| < 8° && |pitch| < 8°` stable ≥ 1.2 s (`STABLE_MS = 1200`)
+- Face bbox **must be inside the oval overlay** (normalized oval: `cx=0.5, cy=0.5, rx=0.275, ry=0.39`)
+- Face-to-frame area ratio in `[0.11, 0.32]` — neither too small nor too close
 
-On capture: freeze frame, haptic buzz (`navigator.vibrate(30)`), shutter animation, upload in background while user proceeds to next angle.
+On capture: crop to an oval-aligned 768×1024 JPEG in canvas (the stored
+portrait is already framed for thumbnail + feature cropping), haptic buzz,
+shutter animation, upload.
 
-Fallback path: if camera fails or user retries 3×, switch to "upload 3 photos" with the same overlay on static images.
+After upload the browser immediately runs the crop + embed pipeline
+(`cropAndUploadFeatures` in `src/lib/face/uploadCrops.ts`):
+1. `cropFeatures` produces one PNG per `FRONT_FEATURES` entry (see §6.2a).
+2. For each crop, `embedImage` (Transformers.js CLIP ViT-B/32) produces a
+   512-dim, L2-normalized `number[]`.
+3. Crop PNG is uploaded to `feature-crops` at
+   `{userId}/{personId}/{faceImageId}/{featureType}.png` (the user-id
+   prefix is required by the bucket RLS policy).
+4. A row is inserted into `feature_embeddings` with
+   `model_version = CLIP_MODEL_VERSION` (`clip-vit-base-patch32-onnx-q8`).
+
+Re-capture is handled by `replacePersonFaceImages` (`src/lib/face/replaceFaceImage.ts`) which atomically swaps the person's face_images + cascades to new embeddings, and the associated migration 0013 marks prior analyses `is_stale=true`.
+
+### 6.3a `FRONT_FEATURES` actually used
+
+From `src/lib/face/regions.ts`:
+
+```ts
+FRONT_FEATURES = [
+  'eyes_left', 'eyes_right', 'nose', 'mouth',
+  'jawline', 'forehead', 'eyebrows_left', 'eyebrows_right', 'face_shape',
+]; // 9 features
+SIDE_FEATURES = ['ear_left', 'ear_right']; // reserved, not currently captured
+// 'hairline' is defined in FACE_REGIONS but is not in any pipeline feature list.
+```
 
 ### 6.4 Family member upload flow
-1. File picker (accept `image/*`)
-2. Run FaceLandmarker in IMAGE mode
-3. If 0 faces → friendly error, show good/bad examples
-4. If >1 face → show "tap the face you want" UI
-5. Auto-crop to face bbox + 20% padding
-6. Confirm screen: crop preview, name input, relationship dropdown
-7. Upload → `validate-face` Edge Function → `embed-features` (embed-face is skipped)
+1. File picker (accept `image/*`).
+2. Run `FaceLandmarker` in IMAGE mode.
+3. If 0 faces → friendly error with good/bad examples.
+4. If >1 face → "tap the face you want" UI (`FaceCropDialog`).
+5. Auto-crop to face bbox + padding (`PhotoEditSheet` lets the user nudge).
+6. Confirm: crop preview, name input, relationship dropdown.
+7. Upload → `validate-face` Edge Function → browser runs the same
+   `cropAndUploadFeatures` pipeline as §6.3. No server embedding.
 
 ---
 
@@ -406,17 +479,23 @@ Screens as routes. Each screen lives in `src/pages/<name>/`. Shared components i
 |---|---|---|
 | `/` | Splash / onboarding carousel | 1 |
 | `/auth` | Magic link + Google | 1 |
-| `/consent` | Consent modal (forced on first login) | 1 |
+| `/consent` | Consent modal (forced before any protected route) | 1 |
 | `/home` | Family tree + "Start analysis" CTA | 1 |
-| `/capture` | 3-angle guided capture | 2 |
+| `/capture` | Front-only guided capture | 2 |
 | `/family/add` | Family member upload | 2 |
 | `/analysis/:id` | Progress screen with realtime status | 3 |
-| `/results/:id` | DNA Map hero screen | 4 |
-| `/results/:id/feature/:type` | Feature detail card | 4 |
+| `/results/:id` | DNA Map hero screen (feature cards inline) | 4 |
 | `/results/:id/share` | Legacy Card + share | 5 |
-| `/mystery/:id` | Mystery Match mode | 7 |
+| `/mystery/:id` | Mystery Match mode (flagged) | 7 |
+| `/sibling` | Sibling Mode stub (flagged) | 7 |
+| `/time-machine` | Time Machine placeholder (flagged) | 7 |
 | `/settings` | Profile, consent, data export, delete | 1 |
 | `/settings/privacy` | Detailed privacy controls, TTL config | 1 |
+
+Route gating lives in `src/App.tsx`: `AuthRequiredRoute` wraps `/consent`,
+and `ProtectedRoute` (auth + consent) wraps everything else. Feature
+flags for `/mystery`, `/sibling`, `/time-machine` come from PostHog via
+`src/lib/flags.ts` (`FLAG_MYSTERY_MATCH`, `FLAG_SIBLING_MODE`, `FLAG_TIME_MACHINE`).
 
 **Navigation:** bottom tab bar — Home · Analyze · Results · Settings. Hide tab bar on capture and auth screens.
 
@@ -468,16 +547,15 @@ Tasks:
 **Goal:** embeddings generated, matches computed, data flows end-to-end.
 
 Tasks:
-- [ ] Scaffold `supabase/functions/_shared/` with: supabase client, sentry wrapper, replicate client, rate limiter, zod schemas
-- [ ] `validate-face` Edge Function
-- [x] `embed-face` Edge Function (Replicate InsightFace) — exists but no longer called in pipeline
-- [x] `embed-features` Edge Function (Replicate CLIP ViT-L/14, 768-dim)
-- [ ] `match-features` Edge Function with the SQL from §5.5
-- [ ] `run-analysis` orchestrator with Realtime status updates
-- [ ] `delete-my-data` Edge Function (replaces Phase 1 stub)
-- [ ] `src/pages/analysis/[id].tsx` subscribing to realtime status
-- [ ] Rate limit: 3 analyses/day for free plan
-- [ ] Model version constants in `supabase/functions/_shared/models.ts`
+- [x] Scaffold `supabase/functions/_shared/` (supabaseAdmin, sentry, rateLimit, schemas, cors, models, cards)
+- [x] `validate-face` Edge Function (client-stamped scores + server bounds check)
+- [x] **Client-side** CLIP ViT-B/32 embedding via Transformers.js (replaces `embed-face` + `embed-features`)
+- [x] `match-features` Edge Function — front-angle RPC (§4.1a), latest-image-per-person (migration 0013)
+- [x] `run-analysis` orchestrator with Realtime status, consent pre-check, 120 s timeouts on sibling calls
+- [x] `delete-my-data` Edge Function (replaces Phase 1 stub)
+- [x] `src/pages/AnalysisProgress.tsx` subscribing to realtime status
+- [ ] Re-enable rate limit: 3 analyses/day free, 30 pro (scaffold present, currently commented in `run-analysis`)
+- [x] Model version constants in `supabase/functions/_shared/models.ts` (`MODEL_VERSIONS`)
 
 **Exit criteria:** running an analysis produces populated `feature_matches` rows with real similarity scores.
 
@@ -574,10 +652,10 @@ After the LLM responds, run a regex deny-list check for: `beautiful|ugly|pretty|
 
 Layered, cheap-first:
 
-1. **Client pre-upload:** face confidence ≥ 0.85, face/frame ratio ≥ 15%, blur score ≥ 100, single face. Free, instant.
-2. **Server post-upload (`validate-face`):** independent face detection as trust check, NSFW classifier, EXIF sanity, file size ≤ 10MB, dims ≥ 400×400.
-3. **Pose validation (self captures only):** the 3 uploaded angles must have pose_yaw values spanning ≥ 90° total. Otherwise reject with "please retry side profiles."
-4. **Rate limiting:** 3 analyses/day free, 30 uploads/day, 100 validation calls/day. All keyed by user_id in `rate_limit_events`.
+1. **Client pre-upload (MediaPipe):** face confidence, face inside oval, bbox ratio ∈ [0.11, 0.32], `|yaw|<8°`, `|pitch|<8°`, stable ≥ 1.2 s, single face. Scores written to `face_images.face_confidence` / `nsfw_score` before calling `validate-face`.
+2. **Server post-upload (`validate-face`):** re-reads the client-written scores, re-checks ownership, bounds file size ≤ 10 MB (HEAD), requires dims ≥ 400×400. Fails closed if scores are missing. No server-side face detection today.
+3. **Pose validation:** front-only capture removes the multi-angle span check. `ear_left`/`ear_right` remain in the schema for a future side-profile pass.
+4. **Rate limiting:** target is 3 analyses/day free, 30/day pro. Scaffolding lives in `_shared/rateLimit.ts` but is **currently disabled** (TODO inside `run-analysis`). Re-enable before production.
 
 ---
 
@@ -596,12 +674,13 @@ VITE_APP_VERSION=
 ```
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
-REPLICATE_API_TOKEN=
-GOOGLE_AI_STUDIO_KEY=
+GOOGLE_AI_STUDIO_KEY=      # Gemini 2.5 Flash Vision (narrate-matches)
 SENTRY_DSN_EDGE=
 DAILY_IP_HASH_SALT=        # rotated daily via cron
 POLICY_VERSION=v1.0.0
 ```
+
+`REPLICATE_API_TOKEN` is **no longer required** — the Replicate dependency was removed when embedding moved client-side.
 
 Never commit secrets. Use `supabase secrets set` for Edge Functions.
 
@@ -624,13 +703,21 @@ facerooots/
 │   ├── App.tsx
 │   ├── lib/
 │   │   ├── supabase.ts
-│   │   ├── face/
-│   │   │   ├── detector.ts
-│   │   │   ├── regions.ts
-│   │   │   ├── cropper.ts
-│   │   │   └── pose.ts
+│   │   ├── storage.ts                    ← signed-URL helpers
+│   │   ├── flags.ts                      ← PostHog feature-flag hook
 │   │   ├── analytics.ts
-│   │   └── sentry.ts
+│   │   ├── sentry.ts
+│   │   ├── face/
+│   │   │   ├── detector.ts               ← MediaPipe singleton
+│   │   │   ├── regions.ts                ← FACE_REGIONS, FRONT_FEATURES, SIDE_FEATURES
+│   │   │   ├── cropper.ts
+│   │   │   ├── pose.ts
+│   │   │   ├── normalize.ts
+│   │   │   ├── embedder.ts               ← Transformers.js CLIP ViT-B/32 (512-dim)
+│   │   │   ├── uploadCrops.ts            ← crop → embed → upload → insert pipeline
+│   │   │   └── replaceFaceImage.ts       ← re-capture, cascades + marks analyses stale
+│   │   └── results/
+│   │       └── featureColors.ts
 │   ├── components/
 │   │   ├── ui/                         ← shadcn/ui primitives
 │   │   ├── consent/
@@ -656,19 +743,26 @@ facerooots/
 │   │   ├── 0001_initial_schema.sql
 │   │   ├── 0002_rls_policies.sql
 │   │   ├── 0003_storage_buckets.sql
-│   │   └── 0004_verdict_cache.sql
+│   │   ├── 0004_match_feature_embeddings_fn.sql
+│   │   ├── 0005_verdict_cache.sql
+│   │   ├── 0006_analyses_card_path.sql
+│   │   ├── 0007_sibling_mode.sql
+│   │   ├── 0008_fix_persons_unique_constraint.sql
+│   │   ├── 0009_update_vector_dimensions.sql    (384 → 768, superseded)
+│   │   ├── 0010_vector_512_client_clip.sql      (768 → 512, current)
+│   │   ├── 0011_match_rpc_security_definer.sql
+│   │   ├── 0012_match_rpc_filter_angle.sql
+│   │   └── 0013_replace_and_invalidate.sql
 │   └── functions/
 │       ├── _shared/
-│       │   ├── supabase.ts
-│       │   ├── replicate.ts
-│       │   ├── gemini.ts
-│       │   ├── ratelimit.ts
+│       │   ├── supabaseAdmin.ts
+│       │   ├── cors.ts            ← handleCors, jsonResponse, requireAuth
+│       │   ├── schemas.ts         ← zod input schemas + parseJsonBody
+│       │   ├── rateLimit.ts       (scaffolded, not wired)
 │       │   ├── sentry.ts
-│       │   ├── models.ts
+│       │   ├── models.ts          ← MODEL_VERSIONS
 │       │   └── cards/LegacyCard.tsx
 │       ├── validate-face/
-│       ├── embed-face/
-│       ├── embed-features/
 │       ├── match-features/
 │       ├── narrate-matches/
 │       ├── render-legacy-card/
@@ -749,4 +843,22 @@ Before you touch code in any phase:
 
 ---
 
-*Last updated: project kickoff. Update the "Last updated" line on any material change.*
+---
+
+## 18. Change log vs. initial draft
+
+Material changes since the Phase-0 draft:
+
+- **Embedding moved fully client-side.** Replicate (InsightFace + CLIP) is gone. Browser runs CLIP ViT-B/32 via `@huggingface/transformers` (ONNX, q8). Embedding dim: `384 → 768 → 512` across migrations 0009 → 0010.
+- **`embed-face` / `embed-features` Edge Functions deleted.** `face_embeddings` table retained but never written.
+- **Capture flow reduced to front-only.** Thresholds loosened to `|yaw|<8°`, `|pitch|<8°`, stable 1.2 s, bbox ∈ [0.11, 0.32], must fit inside oval overlay. The 3-angle state machine is gone.
+- **Matching RPC hardened.** `SECURITY DEFINER` (0011), front-angle filter (0012), latest-image-per-person via `DISTINCT ON` (0013). `is_stale` column added to `analyses` so re-captures prompt a re-run.
+- **`persons` uniqueness fixed** (0008): partial unique index on `(owner_user_id) where is_self=true` replaces the broken full-column constraint.
+- **`verdict_cache` now keyed by content hash** of the two crop bytes, not by storage path. `analyses.card_storage_path` added (0006).
+- **Consent is enforced by `run-analysis`:** rejects if `consent_events` is missing, revoked, or `scopes.embeddings !== true`.
+- **Sibling Mode stub tables** (`sibling_analyses`, `sibling_feature_deltas`) added (0007). UI behind `FLAG_SIBLING_MODE`.
+- **Rate limiting temporarily disabled** inside `run-analysis` (TODO marker). Scaffold kept.
+- **`validate-face` simplified:** server-side face detection removed; trusts client-written `face_confidence` / `nsfw_score` and fails closed if absent.
+- **Render failure is non-fatal:** `run-analysis` logs and marks `done` even if `render-legacy-card` fails — card can be regenerated from the Share page.
+
+*Last updated: 2026-04-20 — synced CLAUDE.md with current client-side CLIP pipeline, front-only capture, and migrations through 0013.*

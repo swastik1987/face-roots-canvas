@@ -13,7 +13,7 @@
  */
 
 import { useRef, useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
@@ -122,6 +122,7 @@ async function cropFaceBlob(
 const FamilyAdd = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,6 +154,20 @@ const FamilyAdd = () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  // If a File was pre-selected by the caller (e.g. the home page drawer passes
+  // it via navigation state), skip the "pick" phase and jump straight to
+  // detection. The ref guard ensures we only consume it once per mount.
+  const preloadHandledRef = useRef(false);
+  useEffect(() => {
+    if (preloadHandledRef.current) return;
+    const navState = location.state as { preloadedFile?: File } | null;
+    if (navState?.preloadedFile) {
+      preloadHandledRef.current = true;
+      handleFile(navState.preloadedFile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — run once on mount only
 
   // Effective person id to replace (explicit param OR existing self in self mode).
   const [effectiveReplaceId, setEffectiveReplaceId] = useState<string | null>(replacePersonId);

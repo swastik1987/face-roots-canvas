@@ -1,7 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
-import { Plus, User, Loader2, AlertCircle, RefreshCw, CheckCircle2, Clock } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Plus, User, Loader2, AlertCircle, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronUp } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/lib/supabase";
@@ -187,6 +187,23 @@ const Home = () => {
   const [analyzeError, setAnalyzeError] = useState("");
   const [analyzeStatus, setAnalyzeStatus] = useState("");
 
+  // Grandparents section expansion state — collapsed by default; auto-expands
+  // once when data loads if grandparent photos already exist.
+  const [paternalGrandparentsExpanded, setPaternalGrandparentsExpanded] = useState(false);
+  const [maternalGrandparentsExpanded, setMaternalGrandparentsExpanded] = useState(false);
+  const grandparentsInitRef = useRef(false);
+  useEffect(() => {
+    if (isLoading || grandparentsInitRef.current) return;
+    grandparentsInitRef.current = true;
+    const tags = new Set(persons.filter((p) => !p.is_self).map((p) => p.relationship_tag));
+    if (tags.has("paternal_grandpa") || tags.has("paternal_grandma")) {
+      setPaternalGrandparentsExpanded(true);
+    }
+    if (tags.has("maternal_grandpa") || tags.has("maternal_grandma")) {
+      setMaternalGrandparentsExpanded(true);
+    }
+  }, [isLoading, persons]);
+
   // Photo edit sheet state
   const [editSheetOpen, setEditSheetOpen] = useState(false);
   const [editPerson, setEditPerson] = useState<Person | null>(null);
@@ -338,19 +355,22 @@ const Home = () => {
   // ── Handle family / self re-upload ───────────────────────────────────────
 
   const handleFamilyReupload = useCallback(
-    (_file: File) => {
+    (file: File) => {
       if (!editPerson) return;
-      // Self upload uses the self mode of /family/add so it sets is_self
-      // correctly and refreshes self-thumbnail; family uploads keep the
-      // existing tag-based replace flow.
+      // Pass the already-selected File via navigation state so FamilyAdd can
+      // skip the "pick" phase and jump straight to face detection — the user
+      // shouldn't have to pick the same file twice.
       if (editPerson.is_self) {
-        navigate(`/family/add?self=1&person_id=${editPerson.id}`);
+        navigate(`/family/add?self=1&person_id=${editPerson.id}`, {
+          state: { preloadedFile: file },
+        });
         return;
       }
       // person_id tells FamilyAdd to replace into the existing row instead
       // of inserting a fresh one (which would orphan the old person).
       navigate(
         `/family/add?tag=${editPerson.relationship_tag}&person_id=${editPerson.id}`,
+        { state: { preloadedFile: file } },
       );
     },
     [editPerson, navigate],
@@ -599,13 +619,37 @@ const Home = () => {
             </h3>
 
             {(filledTags.has("father") || filledTags.has("paternal_grandpa") || filledTags.has("paternal_grandma")) && (
-              <div className="flex flex-col items-center gap-2 sm:gap-4 w-full">
-                <div className="text-[9px] uppercase tracking-wider text-muted-foreground/50 hidden sm:block">
+              <div className="flex flex-col items-center gap-2 sm:gap-3 w-full">
+                <button
+                  onClick={() => setPaternalGrandparentsExpanded((v) => !v)}
+                  className="flex items-center gap-1 text-[9px] sm:text-[10px] uppercase tracking-wider text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors px-2 py-0.5 rounded-full hover:bg-white/5"
+                >
+                  {!paternalGrandparentsExpanded &&
+                    !filledTags.has("paternal_grandpa") &&
+                    !filledTags.has("paternal_grandma") && (
+                      <Plus size={8} className="shrink-0" />
+                    )}
                   Grandparents
-                </div>
-                <div className="flex flex-row flex-wrap justify-center gap-2 sm:gap-4 w-full">
-                  {renderNodeGroup(["paternal_grandpa", "paternal_grandma"])}
-                </div>
+                  {paternalGrandparentsExpanded ? (
+                    <ChevronUp size={10} className="ml-0.5 shrink-0" />
+                  ) : (
+                    <ChevronDown size={10} className="ml-0.5 shrink-0" />
+                  )}
+                </button>
+                <AnimatePresence>
+                  {paternalGrandparentsExpanded && (
+                    <motion.div
+                      key="paternal-grandparents"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                      className="flex flex-row flex-wrap justify-center gap-2 sm:gap-4 w-full overflow-hidden"
+                    >
+                      {renderNodeGroup(["paternal_grandpa", "paternal_grandma"])}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
 
@@ -622,13 +666,37 @@ const Home = () => {
             </h3>
 
             {(filledTags.has("mother") || filledTags.has("maternal_grandpa") || filledTags.has("maternal_grandma")) && (
-              <div className="flex flex-col items-center gap-2 sm:gap-4 w-full">
-                <div className="text-[9px] uppercase tracking-wider text-muted-foreground/50 hidden sm:block">
+              <div className="flex flex-col items-center gap-2 sm:gap-3 w-full">
+                <button
+                  onClick={() => setMaternalGrandparentsExpanded((v) => !v)}
+                  className="flex items-center gap-1 text-[9px] sm:text-[10px] uppercase tracking-wider text-muted-foreground/50 hover:text-muted-foreground/80 transition-colors px-2 py-0.5 rounded-full hover:bg-white/5"
+                >
+                  {!maternalGrandparentsExpanded &&
+                    !filledTags.has("maternal_grandpa") &&
+                    !filledTags.has("maternal_grandma") && (
+                      <Plus size={8} className="shrink-0" />
+                    )}
                   Grandparents
-                </div>
-                <div className="flex flex-row flex-wrap justify-center gap-2 sm:gap-4 w-full">
-                  {renderNodeGroup(["maternal_grandpa", "maternal_grandma"])}
-                </div>
+                  {maternalGrandparentsExpanded ? (
+                    <ChevronUp size={10} className="ml-0.5 shrink-0" />
+                  ) : (
+                    <ChevronDown size={10} className="ml-0.5 shrink-0" />
+                  )}
+                </button>
+                <AnimatePresence>
+                  {maternalGrandparentsExpanded && (
+                    <motion.div
+                      key="maternal-grandparents"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                      className="flex flex-row flex-wrap justify-center gap-2 sm:gap-4 w-full overflow-hidden"
+                    >
+                      {renderNodeGroup(["maternal_grandpa", "maternal_grandma"])}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
 
