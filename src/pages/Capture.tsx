@@ -18,7 +18,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, RotateCcw, AlertCircle } from "lucide-react";
-import { initDetector, setRunningMode, detectVideoFrame, isDetectorReady } from "@/lib/face/detector";
+import { initDetector, setRunningMode, detectVideoFrame, detectImage, isDetectorReady } from "@/lib/face/detector";
 import { extractPose } from "@/lib/face/pose";
 import { cropAndUploadFeatures, loadImageFromBlob } from "@/lib/face/uploadCrops";
 import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
@@ -375,24 +375,37 @@ const Capture = () => {
 
         newFaceImageIds.push(imgRow.id);
 
-        const lms = frame.landmarkResult;
-        const matrices = lms.facialTransformationMatrixes;
-        const matrixArr = matrices?.[0]?.data ? Array.from(matrices[0].data) : null;
-        // bbox is attached to the frame at capture time
-        const bbox = (frame as unknown as { bbox?: { x: number; y: number; w: number; h: number } }).bbox ?? null;
+        // Re-detect on the stored portrait so landmarks are in portrait
+        // coordinate space, not video-frame space.
+        //
+        // The guided capture crops a zoomed face region from the live video
+        // feed into a 768×1024 portrait. The original landmarkResult has
+        // normalised coords relative to the full video dimensions (e.g.
+        // 1280×720). Using those coords against the portrait would map every
+        // feature to the wrong pixel region — exactly the bug fixed for
+        // family uploads in FamilyAdd handleSave (two-pass detection).
+        const sourceImg = await loadImageFromBlob(frame.blob);
+        await setRunningMode("IMAGE");
+        const portraitResult = detectImage(sourceImg);
+        const portraitLandmarks = portraitResult.faceLandmarks?.[0] ?? [];
+        const portraitMatrix = portraitResult.facialTransformationMatrixes?.[0]?.data
+          ? Array.from(portraitResult.facialTransformationMatrixes[0].data)
+          : null;
+
         await supabase.from("face_landmarks").insert({
           face_image_id: imgRow.id,
           landmarks_json: {
-            landmarks: lms.faceLandmarks?.[0] ?? [],
-            matrix: matrixArr,
-            bbox,
+            landmarks: portraitLandmarks,   // portrait coordinate space ✓
+            matrix: portraitMatrix,
+            bbox: { x: 0, y: 0, w: 1, h: 1 }, // portrait fills its own frame
           },
         });
 
-        // Crop features client-side from the already-oval-cropped portrait.
+        // Crop features using portrait-space source + portrait-space landmarks.
         try {
-          const sourceImg = await loadImageFromBlob(frame.blob);
-          await cropAndUploadFeatures(selfPerson.id, imgRow.id, sourceImg, frame.landmarkResult, frame.angle);
+          if (portraitLandmarks.length > 0) {
+            await cropAndUploadFeatures(selfPerson.id, imgRow.id, sourceImg, portraitResult, frame.angle);
+          }
         } catch (cropErr) {
           console.warn("[Capture] Feature crop upload failed:", cropErr);
         }
