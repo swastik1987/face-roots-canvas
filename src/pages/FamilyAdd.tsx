@@ -383,24 +383,47 @@ const FamilyAdd = () => {
         person = inserted;
       }
 
-      // 1. Detect landmarks directly on the final normalized crop blob
-      const normalizedCropBlob = await normalizeToPortrait(cropBlob);
+      // 1a. Detect on the RAW crop blob BEFORE normalization.
+      //     normalizeToPortrait() centre-crops ~64 px from each side (512 → 384 px
+      //     wide) when the input is square. That shaves the edges of a tight face
+      //     crop, shifting landmark positions just enough that feature regions are
+      //     extracted from the wrong part of the face (e.g. "Nose" shows forehead).
+      //     Detecting on the un-clipped blob gives accurate landmarks for cropping.
       await initDetector();
       await setRunningMode("IMAGE");
-      const croppedImgForDetect = new Image();
-      croppedImgForDetect.src = URL.createObjectURL(normalizedCropBlob);
-      await new Promise<void>((resolve, reject) => {
-        croppedImgForDetect.onload = () => resolve();
-        croppedImgForDetect.onerror = () => reject(new Error("Failed to load cropped image for detection"));
-      });
 
-      const finalDetectionResult = detectImage(croppedImgForDetect);
-      const finalLandmarks = finalDetectionResult.faceLandmarks?.[0] ?? [];
-      const finalMatrices = finalDetectionResult.facialTransformationMatrixes?.[0]?.data
-        ? Array.from(finalDetectionResult.facialTransformationMatrixes[0].data)
+      const rawCropImg = new Image();
+      rawCropImg.src = URL.createObjectURL(cropBlob);
+      await new Promise<void>((resolve, reject) => {
+        rawCropImg.onload = () => resolve();
+        rawCropImg.onerror = () => reject(new Error("Failed to load crop image for feature detection"));
+      });
+      const featureDetectionResult = detectImage(rawCropImg);
+      const featureLandmarks = featureDetectionResult.faceLandmarks?.[0] ?? [];
+
+      // 1b. Normalize to portrait for storage, then re-detect on the stored image.
+      //     Stored landmarks must be in the normalized portrait's coordinate space
+      //     so the backfill path (ensureAllCropsUploaded) can use them correctly
+      //     when it downloads the portrait from face-images-raw.
+      const normalizedCropBlob = await normalizeToPortrait(cropBlob);
+      const normalizedImg = new Image();
+      normalizedImg.src = URL.createObjectURL(normalizedCropBlob);
+      await new Promise<void>((resolve, reject) => {
+        normalizedImg.onload = () => resolve();
+        normalizedImg.onerror = () => reject(new Error("Failed to load normalized portrait"));
+      });
+      const storeDetectionResult = detectImage(normalizedImg);
+      // Prefer landmarks from the stored-image detection for backfill consistency;
+      // fall back to the raw-crop landmarks if normalization clipped too aggressively.
+      const finalLandmarks =
+        storeDetectionResult.faceLandmarks?.[0]?.length
+          ? storeDetectionResult.faceLandmarks[0]
+          : featureLandmarks;
+      const finalMatrices = storeDetectionResult.facialTransformationMatrixes?.[0]?.data
+        ? Array.from(storeDetectionResult.facialTransformationMatrixes[0].data)
         : null;
 
-      // 2. Upload the cropped face image
+      // 2. Upload the normalized portrait to storage
       const folder = isSelfMode ? "self" : "family";
       const path = `${user.id}/${folder}/${person.id}_${Date.now()}.jpg`;
       const { error: se } = await supabase.storage
@@ -408,7 +431,8 @@ const FamilyAdd = () => {
         .upload(path, normalizedCropBlob, { contentType: "image/jpeg" });
       if (se) throw se;
 
-      // 3. face_images row
+      // 3. face_images row — confidence from the pre-normalization detection
+      //    (more reliable for tight crops where normalization may clip edges)
       const { data: imgRow, error: ie } = await supabase
         .from("face_images")
         .insert({
@@ -416,13 +440,14 @@ const FamilyAdd = () => {
           storage_path: path,
           angle: "front",
           capture_method: "upload_cropped",
-          face_confidence: finalLandmarks.length > 0 ? 1 : 0,
+          face_confidence: featureLandmarks.length > 0 ? 1 : 0,
         })
         .select("id")
         .single();
       if (ie) throw ie;
 
-      // 4. face_landmarks — store accurate bbox + landmarks
+      // 4. face_landmarks — stored in normalized-portrait coordinate space
+      //    so the backfill path can pair them with the stored portrait correctly
       await supabase.from("face_landmarks").insert({
         face_image_id: imgRow.id,
         landmarks_json: {
@@ -432,15 +457,18 @@ const FamilyAdd = () => {
         },
       });
 
-      // 5. Crop features client-side
-      if (finalLandmarks.length > 0) {
+      // 5. Crop features using the RAW (pre-normalization) image + its landmarks.
+      //    This is the core fix: the face is fully centred and un-clipped in the
+      //    512×512 blob, so each feature region maps to the correct pixel area.
+      if (featureLandmarks.length > 0) {
         try {
-          await cropAndUploadFeatures(person.id, imgRow.id, croppedImgForDetect, finalDetectionResult, "front");
+          await cropAndUploadFeatures(person.id, imgRow.id, rawCropImg, featureDetectionResult, "front");
         } catch (cropErr) {
           console.warn("[FamilyAdd] Feature crop upload failed:", cropErr);
         }
       }
-      URL.revokeObjectURL(croppedImgForDetect.src);
+      URL.revokeObjectURL(rawCropImg.src);
+      URL.revokeObjectURL(normalizedImg.src);
 
       // Purge any prior images for this person + mark analyses stale.
       await replacePersonFaceImages({

@@ -72,7 +72,15 @@ export async function setRunningMode(mode: 'IMAGE' | 'VIDEO'): Promise<void> {
   if (!landmarker) await initDetector();
   // VIDEO (live capture) tracks a single face; IMAGE (uploads) may contain
   // multiple people and we want to surface them all to the picker.
-  await landmarker!.setOptions({ runningMode: mode, numFaces: mode === 'VIDEO' ? 1 : 5 });
+  // Lower the detection confidence thresholds for IMAGE mode so group photos
+  // with slightly-angled or farther-away faces are still detected.
+  // VIDEO keeps stricter thresholds to avoid false positives during live capture.
+  await landmarker!.setOptions({
+    runningMode: mode,
+    numFaces: mode === 'VIDEO' ? 1 : 5,
+    minFaceDetectionConfidence: mode === 'VIDEO' ? 0.7 : 0.5,
+    minFacePresenceConfidence: mode === 'VIDEO' ? 0.7 : 0.5,
+  });
 }
 
 /**
