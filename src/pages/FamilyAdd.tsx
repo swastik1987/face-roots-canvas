@@ -13,7 +13,7 @@
  */
 
 import { useRef, useState, useEffect } from "react";
-import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ import { Upload, Loader2, CheckCircle2, AlertCircle, CropIcon, RotateCcw, Pencil
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
 import { extractPose } from "@/lib/face/pose";
 import { cropAndUploadFeatures } from "@/lib/face/uploadCrops";
+import { consumePendingFile } from "@/lib/pendingFile";
 import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
 import { normalizeToPortrait } from "@/lib/face/normalize";
 import { useAuth } from "@/contexts/AuthContext";
@@ -122,7 +123,6 @@ async function cropFaceBlob(
 const FamilyAdd = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const location = useLocation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -155,16 +155,16 @@ const FamilyAdd = () => {
     };
   }, [previewUrl]);
 
-  // If a File was pre-selected by the caller (e.g. the home page drawer passes
-  // it via navigation state), skip the "pick" phase and jump straight to
-  // detection. The ref guard ensures we only consume it once per mount.
+  // If a File was pre-selected by the caller (e.g. the home page drawer), it
+  // was stashed in a module singleton before navigation. Consume it once on
+  // mount and jump straight to face detection, skipping the "pick" step.
   const preloadHandledRef = useRef(false);
   useEffect(() => {
     if (preloadHandledRef.current) return;
-    const navState = location.state as { preloadedFile?: File } | null;
-    if (navState?.preloadedFile) {
+    const file = consumePendingFile();
+    if (file) {
       preloadHandledRef.current = true;
-      handleFile(navState.preloadedFile);
+      handleFile(file);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — run once on mount only

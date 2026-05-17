@@ -12,6 +12,7 @@ import { ensureAllCropsUploaded, cropAndUploadFeatures } from "@/lib/face/upload
 import { replacePersonFaceImages } from "@/lib/face/replaceFaceImage";
 import { normalizeToPortrait } from "@/lib/face/normalize";
 import { initDetector, setRunningMode, detectImage } from "@/lib/face/detector";
+import { setPendingFile } from "@/lib/pendingFile";
 import PhotoEditSheet from "@/components/PhotoEditSheet";
 import SelfPhotoSourceSheet from "@/components/SelfPhotoSourceSheet";
 import FaceCropDialog from "@/components/FaceCropDialog";
@@ -357,20 +358,19 @@ const Home = () => {
   const handleFamilyReupload = useCallback(
     (file: File) => {
       if (!editPerson) return;
-      // Pass the already-selected File via navigation state so FamilyAdd can
-      // skip the "pick" phase and jump straight to face detection — the user
-      // shouldn't have to pick the same file twice.
+      // Stash the already-selected File in a module singleton so FamilyAdd can
+      // consume it on mount and skip the "pick" phase. Navigation state is
+      // avoided here because History API structured-clone can silently drop
+      // File objects in sandboxed / preview environments.
+      setPendingFile(file);
       if (editPerson.is_self) {
-        navigate(`/family/add?self=1&person_id=${editPerson.id}`, {
-          state: { preloadedFile: file },
-        });
+        navigate(`/family/add?self=1&person_id=${editPerson.id}`);
         return;
       }
       // person_id tells FamilyAdd to replace into the existing row instead
       // of inserting a fresh one (which would orphan the old person).
       navigate(
         `/family/add?tag=${editPerson.relationship_tag}&person_id=${editPerson.id}`,
-        { state: { preloadedFile: file } },
       );
     },
     [editPerson, navigate],
